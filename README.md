@@ -1,36 +1,117 @@
 # lockstep
 
-Hermetic CMake dependencies. Every package is pinned in `lockstep.lock` to a
-commit and a SHA-256 Merkle hash of its source tree, so a configure on any
-machine gets byte-identical sources or fails. The interface is CPM's, and
-dependencies that use CPM or FetchContent themselves go through it too.
+lockstep fetches a CMake project's dependencies and pins each one in
+`lockstep.lock` to a commit and a hash of its files. A configure on any machine
+then gets the same sources or stops with an error; it takes the same calls as
+CPM.
 
-## Use
+## Install
 
-Copy [`cmake/lockstep.cmake`](cmake/lockstep.cmake) into your project. It is
-the only file you commit: about 40 lines that pin a lockstep release and its
-per-platform SHA-256s. Load it during the top-level `project()`:
+```bash
+brew install jamierpond/tap/lockstep
+scoop bucket add jamierpond https://github.com/jamierpond/scoop-bucket && scoop install lockstep
+```
+
+A project does not need it installed: its `cmake/lockstep.cmake` downloads the
+binary it pins. An installed `lockstep` run inside a project runs the version
+that project pins.
+
+## Switching from CPM
+
+1. Copy [`cmake/lockstep.cmake`](cmake/lockstep.cmake) into your project and
+   put `set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES ${CMAKE_CURRENT_LIST_DIR}/cmake/lockstep.cmake)`
+   before `project()`.
+2. Delete `CPM.cmake`. `include(CPM)` lines can stay: lockstep answers them
+   with an empty stub, and your `CPMAddPackage` calls work unchanged.
+3. Configure once with `cmake -B build -DLOCKSTEP_MODE=update`, then commit
+   `lockstep.lock`.
+
+## A 30-second demo
+
+Paste this into an empty directory (it needs `cmake/lockstep.cmake` from this
+repository):
 
 ```cmake
 cmake_minimum_required(VERSION 3.25)
 set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES ${CMAKE_CURRENT_LIST_DIR}/cmake/lockstep.cmake)
-project(MyApp)
+project(Demo NONE)
 
-lockstep_add_package(NAME Miro GITHUB eyalamirmusic/Miro GIT_TAG main
-                     OPTIONS "MIRO_BUILD_TESTS OFF")
-lockstep_add_package(NAME zlib URL https://zlib.net/zlib-1.3.1.tar.gz DOWNLOAD_ONLY)
+lockstep_add_package(NAME fmt GITHUB fmtlib/fmt GIT_TAG 11.0.2 DOWNLOAD_ONLY)
 ```
 
-The first time, write the lock, then commit `lockstep.lock`:
+With no lock yet, a plain configure refuses and says what to run:
 
-```bash
-cmake -B build -DLOCKSTEP_MODE=update
+```console
+$ cmake -B build
+lockstep: CMakeLists.txt:5 asks for fmt, and there is no lockstep.lock yet.
+  To write the lock, run: cmake -B build -DLOCKSTEP_MODE=update
 ```
 
-Every configure after that is `locked`: it fetches exactly the locked commit,
-checks the content hash, and fails when a package is missing from the lock or
-asked for at a different URL or ref. Configure ends with `lockstep: root <hash>`,
-one hash over every package.
+Write the lock:
+
+```console
+$ cmake -B build -DLOCKSTEP_MODE=update
+lockstep: resolving fmt at '11.0.2' from https://github.com/fmtlib/fmt.git
+lockstep: locked fmt at 0c9fce2ffefecfdce794e1859584e25877b7b592 (content 9cf326c866562a2f60a8ab2ab847e9f6674918b226eb95aec6de2c7ce0ff6649)
+-- lockstep: root 4a88cf6cb8b629abf641a08dc0d1996ed94f0e4d93fa36be901473050ead16f8
+```
+
+`lockstep.lock` now holds:
+
+```json
+{
+  "bootstrap": "cmake/lockstep.cmake",
+  "packages": [
+    {
+      "commit": "0c9fce2ffefecfdce794e1859584e25877b7b592",
+      "hash": "9cf326c866562a2f60a8ab2ab847e9f6674918b226eb95aec6de2c7ce0ff6649",
+      "kind": "git",
+      "name": "fmt",
+      "patches": [],
+      "requestedRef": "11.0.2",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
+      "url": "https://github.com/fmtlib/fmt.git"
+    }
+  ],
+  "root": "4a88cf6cb8b629abf641a08dc0d1996ed94f0e4d93fa36be901473050ead16f8",
+  "version": 1
+}
+```
+
+Change `GIT_TAG 11.0.2` to `GIT_TAG 11.1.0`. Locked mode refuses the new tag.
+`LOCKSTEP_MODE` is a cache variable, so pass `locked` to leave update mode:
+
+```console
+$ cmake -B build -DLOCKSTEP_MODE=locked
+lockstep: CMakeLists.txt:5 asks for fmt at '11.1.0', but lockstep.lock pins it at '11.0.2'.
+  To lock what the CMake asks for, run: cmake -B build -DLOCKSTEP_MODE=update
+```
+
+Run what it says, and locked mode passes again:
+
+```console
+$ cmake -B build -DLOCKSTEP_MODE=update
+lockstep: resolving fmt at '11.1.0' from https://github.com/fmtlib/fmt.git
+lockstep: locked fmt at 0e8aad961d66904cfda8d7cc894f6f6eee2d9f30 (content aaed0084d88b1e6f6fd140c91a719dd8cd2b300b457b6f84c42d314c459bc6d2)
+-- lockstep: root a98b0b1574cbe1f38954f5f05620b2ea91d6f2512a0195a338fda2f5e2741854
+$ cmake -B build -DLOCKSTEP_MODE=locked
+-- lockstep: root a98b0b1574cbe1f38954f5f05620b2ea91d6f2512a0195a338fda2f5e2741854
+```
+
+`lockstep update fmt` is for the other case: the CMake is unchanged and you
+want the lock to follow where its tag or branch points now.
+
+## Reference
+
+Every configure after the first is `locked`: it fetches exactly the locked
+commit, checks the content hash, and fails when a package is missing from the
+lock or asked for at a different URL or ref. Configure ends with
+`lockstep: root <hash>`, one hash over every package.
 
 `lockstep_add_package` takes `NAME`, `GITHUB` (or `GITHUB_REPOSITORY`,
 `GITLAB_REPOSITORY`, `GIT_REPOSITORY`), `GIT_TAG` or `VERSION` (meaning tag
@@ -64,26 +145,6 @@ lockstep verify            # check each cache entry against its lock hash
 lockstep verify --full     # rehash every tree instead of trusting size/mtime stamps
 lockstep root              # print the root hash
 ```
-
-## Install
-
-```bash
-brew install jamierpond/tap/lockstep
-scoop bucket add jamierpond https://github.com/jamierpond/scoop-bucket && scoop install lockstep
-```
-
-A project does not need it installed: its `lockstep.cmake` downloads the binary
-it pins. Run inside a project, an installed `lockstep` reads
-the version the project's `lockstep.cmake` pins and runs that exact release instead, so
-the lock is always written by the version the project builds with.
-
-### Switching from CPM
-
-Add `cmake/lockstep.cmake` as above, delete your `CPM.cmake`, and configure
-once with `-DLOCKSTEP_MODE=update`. Your `CPMAddPackage` calls work unchanged.
-Your `include(CPM)` lines can go eventually but do not have to: under lockstep
-they find a stub that does nothing, so a dependency's own lines never need
-editing.
 
 ### Dependencies that use CPM or FetchContent
 

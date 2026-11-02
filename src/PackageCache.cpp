@@ -2,9 +2,11 @@
 #include "Download.h"
 #include "Git.h"
 #include "MerkleHash.h"
+#include "Messages.h"
 #include "Sha256.h"
 
 #include <eacp/Core/Process/Process.h>
+#include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Environment.h>
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/Strings.h>
@@ -186,7 +188,15 @@ eacp::FilePath PackageCache::fetchCommitIntoMirror(const std::string& name,
                                    "fetching it");
     }
 
-    fetchRefIntoMirror(mirror, commit);
+    try
+    {
+        fetchRefIntoMirror(mirror, commit);
+    }
+    catch (const std::runtime_error&)
+    {
+        throw std::runtime_error(describeFailedDownload({name, url, commit}));
+    }
+
     return mirror;
 }
 
@@ -290,7 +300,17 @@ void PackageCache::fetchArchiveTree(const PackageRequest& request,
                                        "forbids downloading it");
         }
 
-        downloadFile(request.url, archive);
+        try
+        {
+            downloadFile(request.url, archive);
+        }
+        catch (const std::runtime_error& error)
+        {
+            eacp::Console::printError(
+                eacp::Strings::concat("lockstep: ", error.what()));
+            throw std::runtime_error(
+                describeFailedDownload({request.name, request.url, {}}));
+        }
     }
 
     if (!request.archiveSha256.empty())
