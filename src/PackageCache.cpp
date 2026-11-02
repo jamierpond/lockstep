@@ -1,6 +1,7 @@
 #include "PackageCache.h"
 #include "Download.h"
 #include "Git.h"
+#include "LongPath.h"
 #include "MerkleHash.h"
 #include "Messages.h"
 #include "Sha256.h"
@@ -127,7 +128,7 @@ bool PackageCache::hasIntactEntry(const std::string& hash,
 void PackageCache::removeEntry(const std::string& hash) const
 {
     auto directory = getSourceDirectory(hash);
-    eacp::Files::removeAll(directory);
+    removeTreeAtAnyLength(directory);
     eacp::Files::removeFile(getStampPath(directory));
 }
 
@@ -159,12 +160,12 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
             applyPatch(contentRoot, patch);
 
         auto stored = storeTree(contentRoot, resolvedCommit, std::move(submodules));
-        eacp::Files::removeAll(staging);
+        removeTreeAtAnyLength(staging);
         return stored;
     }
     catch (...)
     {
-        eacp::Files::removeAll(staging);
+        removeTreeAtAnyLength(staging);
         throw;
     }
 }
@@ -365,7 +366,7 @@ MaterializedPackage
     {
         eacp::Files::createDirectories(destination.parentDirectory());
 
-        if (!eacp::Files::moveFile(tree, destination)
+        if (!renameAtAnyLength(tree, destination)
             && !eacp::Files::isDirectory(destination))
             throw std::runtime_error("cannot move the unpacked tree into "
                                      + destination.str());

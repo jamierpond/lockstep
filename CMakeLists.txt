@@ -27,6 +27,7 @@ add_library(lockstep-lib STATIC
         src/Download.cpp
         src/Git.cpp
         src/LockFile.cpp
+        src/LongPath.cpp
         src/MerkleHash.cpp
         src/PackageArguments.cpp
         src/PackageCache.cpp
@@ -39,6 +40,10 @@ target_include_directories(lockstep-lib PUBLIC src)
 target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)
 
 add_executable(lockstep src/Main.cpp)
+
+if (WIN32)
+    target_sources(lockstep PRIVATE packaging/lockstep.manifest)
+endif ()
 target_link_libraries(lockstep PRIVATE lockstep-lib)
 # res_embed_add links ResEmbed into lockstep directly, ahead of eacp-core and
 # Miro, which need it too; without reordering CMake repeats it after them and

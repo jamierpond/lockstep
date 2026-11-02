@@ -1,6 +1,8 @@
 #include "Sha256.h"
 
-#include <eacp/Core/Utils/MemoryMappedFile.h>
+#include "LongPath.h"
+
+#include <fstream>
 
 #include <algorithm>
 
@@ -190,15 +192,30 @@ std::string computeSha256Hex(std::string_view text)
     return convertDigestToHex(hasher.finish());
 }
 
-Sha256Digest computeFileSha256(const eacp::FilePath& file)
+Sha256Digest computeFileSha256(const std::filesystem::path& file)
 {
-    auto mapped = eacp::MemoryMappedFile(file);
+    constexpr auto readChunkSize = std::size_t {1 << 20};
+    auto stream = std::ifstream {file, std::ios::binary};
 
-    if (!mapped.isValid())
-        throw std::runtime_error("cannot open " + file.str() + " to hash it");
+    if (!stream)
+        throw std::runtime_error("cannot open " + eacp::FilePath {file}.str()
+                                 + " to hash it");
 
     auto hasher = Sha256 {};
-    hasher.update(mapped.text());
+    auto chunk = std::vector<char>(readChunkSize);
+
+    while (stream.read(chunk.data(), static_cast<std::streamsize>(chunk.size()))
+           || stream.gcount() > 0)
+    {
+        auto readCount = static_cast<std::size_t>(stream.gcount());
+        hasher.update(std::string_view {chunk.data(), readCount});
+    }
+
     return hasher.finish();
+}
+
+Sha256Digest computeFileSha256(const eacp::FilePath& file)
+{
+    return computeFileSha256(getLongPathSafeStdPath(file));
 }
 } // namespace lockstep

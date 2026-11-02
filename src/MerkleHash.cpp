@@ -1,13 +1,12 @@
 #include "MerkleHash.h"
+#include "LongPath.h"
 #include "Sha256.h"
 
-#include <eacp/Core/Utils/File.h>
-#include <eacp/Core/Utils/Files.h>
-#include <eacp/Core/Utils/StdPath.h>
-
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <stdexcept>
+#include <vector>
 
 namespace lockstep
 {
@@ -15,121 +14,157 @@ namespace
 {
 constexpr auto excludedDirectoryName = std::string_view {".git"};
 
-bool isExcludedEntry(const eacp::Files::DirectoryEntry& entry)
+enum class TreeEntryKind
 {
-    return entry.path.fileName() == excludedDirectoryName;
+    file,
+    directory,
+    symlink
+};
+
+struct TreeEntry
+{
+    std::filesystem::path path;
+    std::string name;
+    TreeEntryKind kind;
+};
+
+TreeEntryKind getTreeEntryKind(const std::filesystem::directory_entry& entry)
+{
+    auto status = entry.symlink_status();
+
+    if (std::filesystem::is_symlink(status))
+        return TreeEntryKind::symlink;
+
+    if (std::filesystem::is_directory(status))
+        return TreeEntryKind::directory;
+
+    if (std::filesystem::is_regular_file(status))
+        return TreeEntryKind::file;
+
+    throw std::runtime_error(eacp::FilePath {entry.path()}.str()
+                             + " is neither a file, a directory "
+                               "nor a symlink, so it cannot be hashed");
 }
 
-eacp::Files::DirectoryOptions getEveryEntryOptions(bool recursive)
+// Sorted by name and without .git, so the hash is the same on every platform.
+std::vector<TreeEntry> listHashedEntries(const std::filesystem::path& directory)
 {
-    auto options = eacp::Files::DirectoryOptions {};
-    options.recursive = recursive;
-    options.includeHidden = true;
-    options.symlinks = eacp::Files::Symlinks::skip;
-    options.onError = [](const eacp::Files::TraversalError& error)
+    auto entries = std::vector<TreeEntry> {};
+    auto error = std::error_code {};
+
+    for (auto iterator = std::filesystem::directory_iterator {directory, error};
+         !error && iterator != std::filesystem::directory_iterator {};
+         iterator.increment(error))
     {
-        throw std::runtime_error("cannot read " + error.path.str() + ": "
-                                 + error.message);
-        return eacp::Files::Visit::stop;
-    };
-    return options;
+        auto name = eacp::FilePath {iterator->path()}.fileName();
+
+        if (name != excludedDirectoryName)
+            entries.push_back({iterator->path(), name, getTreeEntryKind(*iterator)});
+    }
+
+    if (error)
+        throw std::runtime_error("cannot read " + eacp::FilePath {directory}.str()
+                                 + ": " + error.message());
+
+    std::sort(entries.begin(),
+              entries.end(),
+              [](const auto& left, const auto& right)
+              { return left.name < right.name; });
+
+    return entries;
 }
 
-std::string computeSymlinkHash(const eacp::FilePath& link)
-{
-    auto target =
-        eacp::FilePath(std::filesystem::read_symlink(eacp::toStdPath(link)));
-    return computeSha256Hex(target.str());
-}
-
-std::string describeEntryKind(eacp::Files::EntryKind kind)
+std::string describeEntryKind(TreeEntryKind kind)
 {
     switch (kind)
     {
-        case eacp::Files::EntryKind::file:
+        case TreeEntryKind::file:
             return "file";
-        case eacp::Files::EntryKind::directory:
+        case TreeEntryKind::directory:
             return "directory";
-        case eacp::Files::EntryKind::symlink:
+        case TreeEntryKind::symlink:
             return "symlink";
-        case eacp::Files::EntryKind::other:
-            break;
     }
 
     throw std::runtime_error("cannot hash a special file");
 }
 
-std::string computeEntryHash(const eacp::Files::DirectoryEntry& entry)
+std::string computeSymlinkHash(const std::filesystem::path& link)
+{
+    auto target = eacp::FilePath(std::filesystem::read_symlink(link));
+    return computeSha256Hex(target.str());
+}
+
+std::string computeMerkleHashOfStdPath(const std::filesystem::path& directory);
+
+std::string computeEntryHash(const TreeEntry& entry)
 {
     switch (entry.kind)
     {
-        case eacp::Files::EntryKind::file:
+        case TreeEntryKind::file:
             return convertDigestToHex(computeFileSha256(entry.path));
-        case eacp::Files::EntryKind::directory:
-            return computeMerkleHash(entry.path);
-        case eacp::Files::EntryKind::symlink:
+        case TreeEntryKind::directory:
+            return computeMerkleHashOfStdPath(entry.path);
+        case TreeEntryKind::symlink:
             return computeSymlinkHash(entry.path);
-        case eacp::Files::EntryKind::other:
-            break;
     }
 
-    throw std::runtime_error(entry.path.str()
-                             + " is neither a file, a directory "
-                               "nor a symlink, so it cannot be hashed");
+    throw std::runtime_error("cannot hash a special file");
 }
-} // namespace
 
-std::string computeMerkleHash(const eacp::FilePath& directory)
+std::string computeMerkleHashOfStdPath(const std::filesystem::path& directory)
 {
-    auto entries =
-        eacp::Files::listDirectory(directory, getEveryEntryOptions(false));
-
-    std::sort(entries.begin(),
-              entries.end(),
-              [](const auto& left, const auto& right)
-              { return left.path.fileName() < right.path.fileName(); });
-
     auto hasher = Sha256 {};
 
-    for (const auto& entry: entries)
+    for (const auto& entry: listHashedEntries(directory))
     {
-        if (isExcludedEntry(entry))
-            continue;
-
         auto line = describeEntryKind(entry.kind) + ' ' + computeEntryHash(entry)
-                    + ' ' + entry.path.fileName() + '\n';
+                    + ' ' + entry.name + '\n';
         hasher.update(line);
     }
 
     return convertDigestToHex(hasher.finish());
 }
 
+std::string describeFileForStamp(const std::filesystem::path& file)
+{
+    auto error = std::error_code {};
+    auto size = std::filesystem::file_size(file, error);
+    auto written = std::filesystem::last_write_time(file, error);
+    auto writtenTicks =
+        static_cast<std::int64_t>(written.time_since_epoch().count());
+    return ' ' + std::to_string(size) + ' ' + std::to_string(writtenTicks);
+}
+
+void addTreeToStamp(Sha256& hasher,
+                    const std::filesystem::path& directory,
+                    const std::string& relativeDirectory)
+{
+    for (const auto& entry: listHashedEntries(directory))
+    {
+        auto relative = relativeDirectory + '/' + entry.name;
+        auto line = relative;
+
+        if (entry.kind == TreeEntryKind::file)
+            line += describeFileForStamp(entry.path);
+
+        hasher.update(line + '\n');
+
+        if (entry.kind == TreeEntryKind::directory)
+            addTreeToStamp(hasher, entry.path, relative);
+    }
+}
+} // namespace
+
+std::string computeMerkleHash(const eacp::FilePath& directory)
+{
+    return computeMerkleHashOfStdPath(getLongPathSafeStdPath(directory));
+}
+
 std::string computeTreeStamp(const eacp::FilePath& directory)
 {
     auto hasher = Sha256 {};
-    auto prefixLength = directory.str().size();
-
-    eacp::Files::forEachEntry(directory,
-                              getEveryEntryOptions(true),
-                              [&](const eacp::Files::DirectoryEntry& entry)
-                              {
-                                  if (isExcludedEntry(entry))
-                                      return eacp::Files::Visit::skipChildren;
-
-                                  auto line = entry.path.str().substr(prefixLength);
-
-                                  if (entry.kind == eacp::Files::EntryKind::file)
-                                  {
-                                      auto file = entry.file();
-                                      line +=
-                                          ' ' + std::to_string(file.size()) + ' '
-                                          + std::to_string(file.modificationTime());
-                                  }
-
-                                  hasher.update(line + '\n');
-                                  return eacp::Files::Visit::next;
-                              });
-
+    addTreeToStamp(hasher, getLongPathSafeStdPath(directory), {});
     return convertDigestToHex(hasher.finish());
 }
 } // namespace lockstep

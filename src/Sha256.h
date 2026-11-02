@@ -3,6 +3,7 @@
 #include <eacp/Core/Utils/FilePath.h>
 
 #include <array>
+#include <filesystem>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -36,4 +37,5 @@ private:
 std::string convertDigestToHex(const Sha256Digest& digest);
 std::string computeSha256Hex(std::string_view text);
 Sha256Digest computeFileSha256(const eacp::FilePath& file);
+Sha256Digest computeFileSha256(const std::filesystem::path& file);
 } // namespace lockstep

@@ -1,5 +1,6 @@
 #include "Git.h"
 
+#include <eacp/Core/Platform/Platform.h>
 #include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/Strings.h>
@@ -33,6 +34,18 @@ eacp::Vector<std::string>
     auto arguments = eacp::Vector<std::string> {"--git-dir=" + mirror.str()};
     arguments.addFrom(rest);
     return arguments;
+}
+
+// Git for Windows refuses checkouts past MAX_PATH unless core.longpaths is set.
+eacp::Vector<std::string>
+    getPlatformArguments(const eacp::Vector<std::string>& arguments)
+{
+    if (!eacp::Platform::isWindows())
+        return arguments;
+
+    auto withLongPaths = eacp::Vector<std::string> {"-c", "core.longpaths=true"};
+    withLongPaths.addFrom(arguments);
+    return withLongPaths;
 }
 
 std::string runGitOrThrow(
@@ -110,7 +123,7 @@ std::optional<std::string>
 {
     auto options = eacp::Processes::ProcessOptions {};
     options.executable = gitExecutable;
-    options.arguments = arguments;
+    options.arguments = getPlatformArguments(arguments);
     options.environment = environment;
     options.environment.add({"GIT_TERMINAL_PROMPT", "0"});
 
