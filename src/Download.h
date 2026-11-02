@@ -6,7 +6,7 @@
 
 namespace lockstep
 {
-// Downloads `url` to `destination` with the system's curl, writing a .part
-// sibling first so an interrupted download never leaves a whole-looking file.
+// Downloads `url` to `destination`, writing a .part sibling first so an
+// interrupted download never leaves a whole-looking file.
 void downloadFile(const std::string& url, const eacp::FilePath& destination);
 } // namespace lockstep

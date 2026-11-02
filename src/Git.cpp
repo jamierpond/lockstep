@@ -1,8 +1,11 @@
 #include "Git.h"
 
+#include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/Strings.h>
 
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
 
 namespace lockstep
@@ -10,18 +13,7 @@ namespace lockstep
 namespace
 {
 constexpr auto gitExecutable = "git";
-
-eacp::Processes::ProcessResult
-    launchGit(const eacp::Vector<std::string>& arguments,
-              const eacp::Vector<eacp::Processes::EnvironmentVariable>& environment)
-{
-    auto options = eacp::Processes::ProcessOptions {};
-    options.executable = gitExecutable;
-    options.arguments = arguments;
-    options.environment = environment;
-    options.environment.add({"GIT_TERMINAL_PROMPT", "0"});
-    return eacp::Processes::run(options);
-}
+constexpr auto fullShaLength = 40;
 
 std::string joinArguments(const eacp::Vector<std::string>& arguments)
 {
@@ -33,43 +25,83 @@ std::string joinArguments(const eacp::Vector<std::string>& arguments)
     return joined;
 }
 
-eacp::Vector<std::string> getMirrorArguments(const eacp::FilePath& mirror)
+eacp::Vector<std::string>
+    createMirrorArguments(const eacp::FilePath& mirror,
+                          const eacp::Vector<std::string>& rest)
 {
-    return {"--git-dir=" + mirror.str()};
+    auto arguments = eacp::Vector<std::string> {"--git-dir=" + mirror.str()};
+    arguments.addFrom(rest);
+    return arguments;
 }
 
-eacp::Vector<std::string> combineArguments(eacp::Vector<std::string> first,
-                                           const eacp::Vector<std::string>& second)
+std::string runGitOrThrow(
+    const eacp::Vector<std::string>& arguments,
+    const eacp::Vector<eacp::Processes::EnvironmentVariable>& environment = {})
 {
-    first.addFrom(second);
-    return first;
+    auto output = runGit(arguments, environment);
+
+    if (!output)
+        throw std::runtime_error(joinArguments(arguments) + " failed");
+
+    return *output;
+}
+
+bool isFullSha(const std::string& ref)
+{
+    return ref.size() == fullShaLength
+           && std::all_of(
+               ref.begin(), ref.end(), [](char c) { return std::isxdigit(c); });
+}
+
+bool isRemoteRefName(const eacp::FilePath& mirror, const std::string& ref)
+{
+    auto listed =
+        runGitOrThrow(createMirrorArguments(mirror, {"ls-remote", "origin", ref}));
+    return !listed.empty();
+}
+
+void fetchEveryBranchAndTag(const eacp::FilePath& mirror)
+{
+    auto arguments = createMirrorArguments(
+        mirror,
+        {"fetch", "--quiet", "--tags", "origin", "+refs/heads/*:refs/heads/*"});
+    auto isShallow = runGitOrThrow(
+        createMirrorArguments(mirror, {"rev-parse", "--is-shallow-repository"}));
+
+    if (isShallow == "true")
+        arguments.add("--unshallow");
+
+    runGitOrThrow(arguments);
 }
 } // namespace
 
-std::string
+std::optional<std::string>
     runGit(const eacp::Vector<std::string>& arguments,
            const eacp::Vector<eacp::Processes::EnvironmentVariable>& environment)
 {
-    auto result = launchGit(arguments, environment);
+    auto options = eacp::Processes::ProcessOptions {};
+    options.executable = gitExecutable;
+    options.arguments = arguments;
+    options.environment = environment;
+    options.environment.add({"GIT_TERMINAL_PROMPT", "0"});
+
+    auto result = eacp::Processes::run(options);
 
     if (!result.launched)
-        throw std::runtime_error("cannot run git; is it on PATH?");
+    {
+        eacp::Console::printError("lockstep: cannot run git; is it on PATH?");
+        return std::nullopt;
+    }
 
     if (result.exitCode != 0)
     {
-        throw std::runtime_error(joinArguments(arguments) + " failed:\n"
-                                 + eacp::Strings::trim(result.errorOutput));
-    }
+        if (eacp::Strings::trim(result.errorOutput).empty())
+            return std::nullopt;
 
-    return eacp::Strings::trim(result.output);
-}
-
-std::optional<std::string> tryRunGit(const eacp::Vector<std::string>& arguments)
-{
-    auto result = launchGit(arguments, {});
-
-    if (!result.launched || result.exitCode != 0)
+        eacp::Console::printError("lockstep: " + joinArguments(arguments) + ":\n"
+                                  + eacp::Strings::trim(result.errorOutput));
         return std::nullopt;
+    }
 
     return eacp::Strings::trim(result.output);
 }
@@ -79,41 +111,31 @@ void createBareMirror(const eacp::FilePath& mirror, const std::string& url)
     if (eacp::Files::isDirectory(mirror))
         return;
 
-    runGit({"init", "--quiet", "--bare", mirror.str()});
-    runGit(combineArguments(getMirrorArguments(mirror),
-                            {"remote", "add", "origin", url}));
+    runGitOrThrow({"init", "--quiet", "--bare", mirror.str()});
+    runGitOrThrow(createMirrorArguments(mirror, {"remote", "add", "origin", url}));
 }
 
 bool hasCommit(const eacp::FilePath& mirror, const std::string& commit)
 {
-    auto arguments = combineArguments(getMirrorArguments(mirror),
-                                      {"cat-file", "-e", commit + "^{commit}"});
-    return tryRunGit(arguments).has_value();
+    auto arguments = createMirrorArguments(
+        mirror, {"rev-parse", "--quiet", "--verify", commit + "^{commit}"});
+    return runGit(arguments).has_value();
 }
 
 std::string fetchRefIntoMirror(const eacp::FilePath& mirror, const std::string& ref)
 {
-    auto mirrorArguments = getMirrorArguments(mirror);
-    auto shallowFetch = combineArguments(
-        mirrorArguments,
-        {"fetch", "--quiet", "--no-tags", "--depth", "1", "origin", ref});
+    if (isFullSha(ref) || isRemoteRefName(mirror, ref))
+    {
+        runGitOrThrow(createMirrorArguments(
+            mirror,
+            {"fetch", "--quiet", "--no-tags", "--depth", "1", "origin", ref}));
+        return runGitOrThrow(
+            createMirrorArguments(mirror, {"rev-parse", "FETCH_HEAD^{commit}"}));
+    }
 
-    if (tryRunGit(shallowFetch))
-        return runGit(
-            combineArguments(mirrorArguments, {"rev-parse", "FETCH_HEAD^{commit}"}));
-
-    auto fullFetch = combineArguments(
-        mirrorArguments,
-        {"fetch", "--quiet", "--tags", "origin", "+refs/heads/*:refs/heads/*"});
-    auto isShallow = runGit(
-        combineArguments(mirrorArguments, {"rev-parse", "--is-shallow-repository"}));
-
-    if (isShallow == "true")
-        fullFetch.add("--unshallow");
-
-    runGit(fullFetch);
-    return runGit(
-        combineArguments(mirrorArguments, {"rev-parse", ref + "^{commit}"}));
+    fetchEveryBranchAndTag(mirror);
+    return runGitOrThrow(
+        createMirrorArguments(mirror, {"rev-parse", ref + "^{commit}"}));
 }
 
 void checkOutCommit(const eacp::FilePath& mirror,
@@ -121,27 +143,27 @@ void checkOutCommit(const eacp::FilePath& mirror,
                     const eacp::FilePath& destination)
 {
     auto indexFile = destination.sibling(destination.fileName() + ".index");
-    auto arguments = combineArguments(getMirrorArguments(mirror),
-                                      {"--work-tree=" + destination.str(),
-                                       "-c",
-                                       "core.autocrlf=false",
-                                       "-c",
-                                       "core.eol=lf",
-                                       "-c",
-                                       "core.symlinks=true",
-                                       "checkout",
-                                       "--quiet",
-                                       "--force",
-                                       commit,
-                                       "--",
-                                       "."});
+    auto arguments = createMirrorArguments(mirror,
+                                           {"--work-tree=" + destination.str(),
+                                            "-c",
+                                            "core.autocrlf=false",
+                                            "-c",
+                                            "core.eol=lf",
+                                            "-c",
+                                            "core.symlinks=true",
+                                            "checkout",
+                                            "--quiet",
+                                            "--force",
+                                            commit,
+                                            "--",
+                                            "."});
 
-    runGit(arguments, {{"GIT_INDEX_FILE", indexFile.str()}});
+    runGitOrThrow(arguments, {{"GIT_INDEX_FILE", indexFile.str()}});
     eacp::Files::removeFile(indexFile);
 }
 
 void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch)
 {
-    runGit({"-C", tree.str(), "apply", "--whitespace=nowarn", patch.str()});
+    runGitOrThrow({"-C", tree.str(), "apply", "--whitespace=nowarn", patch.str()});
 }
 } // namespace lockstep

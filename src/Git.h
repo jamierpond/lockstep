@@ -8,16 +8,14 @@
 
 namespace lockstep
 {
-// Runs git with `arguments` and returns its trimmed stdout. Throws with git's
-// stderr when it exits non-zero or cannot be launched.
-std::string runGit(
+// git's trimmed stdout, or nullopt when it cannot be launched or exits
+// non-zero, in which case its stderr has been printed.
+std::optional<std::string> runGit(
     const eacp::Vector<std::string>& arguments,
     const eacp::Vector<eacp::Processes::EnvironmentVariable>& environment = {});
 
-// The same, but nullopt on a non-zero exit instead of throwing.
-std::optional<std::string> tryRunGit(const eacp::Vector<std::string>& arguments);
-
 void createBareMirror(const eacp::FilePath& mirror, const std::string& url);
+
 bool hasCommit(const eacp::FilePath& mirror, const std::string& commit);
 
 // The commit `ref` names on the remote now: a branch, a tag or a full sha.

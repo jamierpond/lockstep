@@ -33,7 +33,7 @@ add_library(lockstep-lib STATIC
         src/Sha256.cpp)
 
 target_include_directories(lockstep-lib PUBLIC src)
-target_link_libraries(lockstep-lib PUBLIC eacp-core)
+target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)
 
 add_executable(lockstep src/Main.cpp)
 target_link_libraries(lockstep PRIVATE lockstep-lib)

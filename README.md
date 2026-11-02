@@ -103,9 +103,12 @@ the same lock verifies on Windows.
 The release binaries run on macOS 11 or newer (one universal binary for arm64
 and x86_64; `eacp-core` links UniformTypeIdentifiers, which needs 11),
 Windows 10 or newer on x64 and arm64 (C runtime linked statically, so no
-VC++ redistributable), and any Linux kernel on x64 and arm64 (statically
-linked against musl, no glibc needed). `git` and `curl` must be on `PATH`;
-Windows 10 and macOS ship `curl`. CI checks these floors on every build.
+VC++ redistributable), and any Linux on x64 and arm64 (statically linked
+against musl, with libcurl and mbedTLS built in, so no glibc needed). `git`
+must be on `PATH`. On Linux, HTTPS trusts the certificates in
+`/etc/ssl/certs/ca-certificates.crt`, which Debian, Ubuntu, Alpine, Arch and
+current Fedora provide; a distribution without that file cannot download
+archives or the pinned binary. CI checks these floors on every build.
 
 ## Building and releasing
 

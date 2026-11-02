@@ -1,8 +1,7 @@
 #include "Download.h"
 
-#include <eacp/Core/Process/Process.h>
 #include <eacp/Core/Utils/Files.h>
-#include <eacp/Core/Utils/Strings.h>
+#include <eacp/Network/HTTP/Http.h>
 
 #include <stdexcept>
 
@@ -10,7 +9,7 @@ namespace lockstep
 {
 namespace
 {
-constexpr auto downloadRetryCount = "3";
+constexpr auto httpOkStatus = 200;
 } // namespace
 
 void downloadFile(const std::string& url, const eacp::FilePath& destination)
@@ -18,26 +17,15 @@ void downloadFile(const std::string& url, const eacp::FilePath& destination)
     auto partial = destination.sibling(destination.fileName() + ".part");
     eacp::Files::createDirectories(destination.parentDirectory());
 
-    auto result = eacp::Processes::run("curl",
-                                       {"--fail",
-                                        "--silent",
-                                        "--show-error",
-                                        "--location",
-                                        "--retry",
-                                        downloadRetryCount,
-                                        "--output",
-                                        partial.str(),
-                                        url});
+    auto response =
+        eacp::HTTP::downloadFile(eacp::HTTP::Request {url}, partial.str());
 
-    if (!result.launched)
-        throw std::runtime_error("cannot run curl to download " + url
-                                 + "; is it on PATH?");
-
-    if (result.exitCode != 0)
+    if (!response.error.empty() || response.statusCode != httpOkStatus)
     {
         eacp::Files::removeFile(partial);
-        throw std::runtime_error("downloading " + url + " failed: "
-                                 + eacp::Strings::trim(result.errorOutput));
+        throw std::runtime_error("downloading " + url + " failed with HTTP status "
+                                 + std::to_string(response.statusCode) + ": "
+                                 + response.error);
     }
 
     if (!eacp::Files::moveFile(partial, destination))
