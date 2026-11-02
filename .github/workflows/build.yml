@@ -1,0 +1,158 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal binary
+        run: |
+          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Check the macOS floor
+        run: scripts/check-floor.sh build/lockstep
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: build/lockstep
+
+  macos-x64-test:
+    needs: macos
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos
+          path: universal
+      - name: Run the universal binary's x86_64 slice
+        run: |
+          chmod +x universal/lockstep
+          arch -x86_64 universal/lockstep --help
+          universal/lockstep resolve --mode update --name adder \
+            --url https://github.com/cpm-cmake/testpack-adder.git --ref v1.0.1 \
+            --lock "$RUNNER_TEMP/lockstep.lock" --cache "$RUNNER_TEMP/cache"
+
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            msvc: amd64
+          - arch: arm64
+            runner: windows-11-arm
+            msvc: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc }}
+      - name: Build
+        run: |
+          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Check no VC++ runtime DLL is imported
+        shell: bash
+        run: |
+          if dumpbin //dependents build/lockstep.exe | grep -iE 'vcruntime|msvcp'; then
+            echo "lockstep.exe needs the VC++ redistributable" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: build/lockstep.exe
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test a static musl binary in Alpine
+        run: docker run --rm -v "$PWD":/w -w /w alpine:3.22 scripts/build-linux-static.sh
+      - name: Run it on the glibc host
+        run: |
+          ldd build-static/lockstep || true
+          build-static/lockstep --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: build-static/lockstep
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, macos-x64-test, windows, linux]
+    runs-on: ubuntu-24.04
+    env:
+      PACKAGING_TOKEN: ${{ secrets.PACKAGING_TOKEN }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Name the assets
+        id: assets
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir release
+          cp artifacts/macos/lockstep "release/lockstep-$version-macos-arm64"
+          cp artifacts/macos/lockstep "release/lockstep-$version-macos-x64"
+          cp artifacts/linux-x64/lockstep "release/lockstep-$version-linux-x64"
+          cp artifacts/linux-arm64/lockstep "release/lockstep-$version-linux-arm64"
+          cp artifacts/windows-x64/lockstep.exe "release/lockstep-$version-windows-x64.exe"
+          cp artifacts/windows-arm64/lockstep.exe "release/lockstep-$version-windows-arm64.exe"
+          chmod +x release/*
+          (cd release && sha256sum * > SHA256SUMS)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/lockstep-*
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --generate-notes
+      - name: Print the lines to paste into cmake/lockstep.cmake
+        run: |
+          version="${{ steps.assets.outputs.version }}"
+          {
+            echo '```cmake'
+            echo "set(LOCKSTEP_VERSION $version)"
+            for platform in macos-arm64 macos-x64 windows-x64 windows-arm64 linux-x64 linux-arm64; do
+              hash=$(grep -E " lockstep-$version-$platform(\.exe)?$" release/SHA256SUMS | cut -d' ' -f1)
+              echo "set(LOCKSTEP_SHA256_$platform \"$hash\")"
+            done
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Update the Homebrew tap and the Scoop bucket
+        if: env.PACKAGING_TOKEN != ''
+        env:
+          TAP_REPOSITORY: ${{ vars.TAP_REPOSITORY || 'jamierpond/homebrew-tap' }}
+          BUCKET_REPOSITORY: ${{ vars.BUCKET_REPOSITORY || 'jamierpond/scoop-bucket' }}
+        run: scripts/update-packaging.sh "${{ steps.assets.outputs.version }}" release/SHA256SUMS

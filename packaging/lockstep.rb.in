@@ -1,0 +1,29 @@
+class Lockstep < Formula
+  desc "Hermetic CMake dependencies with a lock file and content hashes"
+  homepage "https://github.com/jamierpond/lockstep"
+  version "@VERSION@"
+
+  on_macos do
+    url "https://github.com/jamierpond/lockstep/releases/download/v@VERSION@/lockstep-@VERSION@-macos-arm64"
+    sha256 "@SHA256_MACOS_ARM64@"
+  end
+
+  on_linux do
+    on_intel do
+      url "https://github.com/jamierpond/lockstep/releases/download/v@VERSION@/lockstep-@VERSION@-linux-x64"
+      sha256 "@SHA256_LINUX_X64@"
+    end
+    on_arm do
+      url "https://github.com/jamierpond/lockstep/releases/download/v@VERSION@/lockstep-@VERSION@-linux-arm64"
+      sha256 "@SHA256_LINUX_ARM64@"
+    end
+  end
+
+  def install
+    bin.install Dir["lockstep-*"].first => "lockstep"
+  end
+
+  test do
+    assert_match "lockstep", shell_output("#{bin}/lockstep --help")
+  end
+end

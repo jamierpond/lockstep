@@ -1,0 +1,16 @@
+{
+    "version": "@VERSION@",
+    "description": "Hermetic CMake dependencies with a lock file and content hashes",
+    "homepage": "https://github.com/jamierpond/lockstep",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/jamierpond/lockstep/releases/download/v@VERSION@/lockstep-@VERSION@-windows-x64.exe#/lockstep.exe",
+            "hash": "@SHA256_WINDOWS_X64@"
+        },
+        "arm64": {
+            "url": "https://github.com/jamierpond/lockstep/releases/download/v@VERSION@/lockstep-@VERSION@-windows-arm64.exe#/lockstep.exe",
+            "hash": "@SHA256_WINDOWS_ARM64@"
+        }
+    },
+    "bin": "lockstep.exe"
+}
