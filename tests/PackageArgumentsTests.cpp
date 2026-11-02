@@ -138,10 +138,10 @@ auto tFetchContentDetails = test("Arguments/fetchContentDeclareDetails") = []
                                "GIT_TAG",
                                "v1.0.1",
                                "SOURCE_DIR",
-                               "/tmp/somewhere"},
-                              lockstep::ArgumentDialect::fetchContent);
+                               "/tmp/somewhere"});
     check(spec.kind == "git");
     check(spec.name == "adder");
+    check(spec.checkoutDirectory == "/tmp/somewhere");
 };
 
 auto tSourceDirOnlyIsLocal = test("Arguments/sourceDirAloneIsLocal") = []
@@ -244,14 +244,39 @@ auto tUrlHash = test("Arguments/urlHashSha256IsKept") = []
 {
     auto spec = parsePackageArguments(
         {"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "SHA256=ABCDEF"});
-    check(spec.archiveSha256 == "abcdef");
+    check(spec.archiveHash.algorithm == "SHA256");
+    check(spec.archiveHash.hex == "abcdef");
 };
 
-auto tUrlHashOther = test("Arguments/urlHashOtherAlgorithmsRefused") = []
+auto tUrlHashSha1 = test("Arguments/urlHashTakesEveryCMakeAlgorithm") = []
 {
-    check(
-        isRejected({"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "MD5=ab"},
-                   "URL_HASH"));
+    auto spec = parsePackageArguments(
+        {"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "sha1=AB"});
+    check(spec.archiveHash.algorithm == "SHA1");
+    check(spec.archiveHash.hex == "ab");
+    auto sha3 = parsePackageArguments(
+        {"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "SHA3_512=cd"});
+    check(sha3.archiveHash.algorithm == "SHA3_512");
+    auto md5 = parsePackageArguments(
+        {"NAME", "z", "URL", "https://x/z.tar.gz", "URL_MD5", "ef"});
+    check(md5.archiveHash.algorithm == "MD5");
+};
+
+auto tUrlHashUnknown = test("Arguments/urlHashUnknownAlgorithmRefused") = []
+{
+    check(isRejected(
+        {"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "CRC32=ab"},
+        "URL_HASH"));
+};
+
+auto tOptionWithoutValue = test("Arguments/optionWithoutValueIsOn") = []
+{
+    auto spec = parsePackageArguments(
+        withGitSource({"OPTIONS", "LIBIGL_WITH_CGAL", "FOO  bar "}));
+    check(spec.options.size() == 2);
+    check(spec.options[0].first == "LIBIGL_WITH_CGAL");
+    check(spec.options[0].second == "ON");
+    check(spec.options[1].second == "bar");
 };
 
 auto tIgnored = test("Arguments/shallowNoCacheAndCacheKeyAreAccepted") = []
@@ -275,16 +300,17 @@ auto tRefused = test("Arguments/commandsAndForceAreRefusedByName") = []
     check(isRejected(withGitSource({"PATCH_COMMAND", "git", "apply"}),
                      "PATCH_COMMAND"));
     check(isRejected(withGitSource({"FORCE", "YES"}), "FORCE"));
-    check(isRejected(withGitSource({"URL_MD5", "ab"}), "URL_MD5"));
 };
 
 auto tUnknown = test("Arguments/unknownOptionIsNamed") = []
 { check(isRejected(withGitSource({"GIT_FROBNICATE", "x"}), "GIT_FROBNICATE")); };
 
-auto tCpmSourceDir = test("Arguments/cpmSourceDirIsLocalEvenWithRepository") = []
+auto tCpmSourceDir = test("Arguments/sourceDirWithRepositoryIsWhereItIsCloned") = []
 {
     auto spec = parsePackageArguments(withGitSource({"SOURCE_DIR", "../a"}));
-    check(spec.kind == "local");
+    check(spec.kind == "git");
+    check(spec.checkoutDirectory == "../a");
+    check(spec.localSourceDirectory.empty());
 };
 
 auto tRelativeUrls = test("Submodules/relativeUrlsResolveAgainstParent") = []

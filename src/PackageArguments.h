@@ -4,11 +4,19 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace lockstep
 {
+// URL_HASH <algorithm>=<hex>, in any algorithm CMake's file(<algorithm>) takes.
+struct ArchiveHash
+{
+    std::string algorithm;
+    std::string hex;
+};
+
 struct PackageSpec
 {
     std::string name;
@@ -16,30 +24,29 @@ struct PackageSpec
     std::string url;
     std::string ref;
     std::string localSourceDirectory;
+    std::string checkoutDirectory;
     std::string sourceSubdirectory;
     std::vector<std::pair<std::string, std::string>> options;
     std::vector<std::string> patches;
     SubmoduleSelection submoduleSelection;
-    std::string archiveSha256;
+    ArchiveHash archiveHash;
     bool isDownloadOnly = false;
     bool isExcludedFromAll = false;
     bool isSystem = false;
 };
 
-// Whose arguments these are: SOURCE_DIR is a local checkout to use for CPM,
-// and only where to put the download for FetchContent_Declare.
-enum class ArgumentDialect
-{
-    cpm,
-    fetchContent
-};
-
 // The arguments of lockstep_add_package, CPMAddPackage (keyword or single-string
 // "gh:owner/repo@1.2.3#tag" form, or URI <shorthand>) and FetchContent_Declare.
+// SOURCE_DIR alone is a local checkout; beside a repository or URL it is where
+// the fetched tree is put, as in CPM and FetchContent.
 // Throws std::invalid_argument naming what is missing or malformed, and every
 // option lockstep does not know or cannot honour.
-PackageSpec parsePackageArguments(const std::vector<std::string>& arguments,
-                                  ArgumentDialect dialect = ArgumentDialect::cpm);
+PackageSpec parsePackageArguments(const std::vector<std::string>& arguments);
+
+// CMake's if() constants: ON/YES/TRUE/Y/1, and OFF/NO/FALSE/N/0/IGNORE or empty.
+bool isCMakeTrue(std::string_view value);
+bool isCMakeFalse(std::string_view value);
+bool isCMakeBoolean(std::string_view value);
 
 // "Miro" for "https://github.com/eyalamirmusic/Miro.git" or
 // ".../Miro-1.0.zip": the last path component without its extension.

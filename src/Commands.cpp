@@ -15,7 +15,10 @@
 
 #include <ResEmbed/ResEmbed.h>
 
+#include "MerkleHash.h"
+
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <stdexcept>
 
@@ -27,11 +30,24 @@ constexpr auto lockedMode = std::string_view {"locked"};
 constexpr auto updateMode = std::string_view {"update"};
 constexpr auto offlineMode = std::string_view {"offline"};
 constexpr auto overrideSuffix = std::string_view {"_SOURCE"};
-constexpr auto overridePrefix = std::string_view {"LOCKSTEP_"};
+constexpr auto overridePrefixes =
+    std::array<std::string_view, 2> {"LOCKSTEP_", "CPM_"};
+constexpr auto archiveKind = std::string_view {"archive"};
 
 void printStatus(const std::string& line)
 {
     eacp::Console::printError("lockstep: " + line);
+}
+
+// An archive has no commit, so its content hash is what names the version.
+std::string describeVersion(const std::string& kind,
+                            const std::string& commit,
+                            const std::string& hash)
+{
+    if (kind == archiveKind)
+        return "content " + hash;
+
+    return commit + " (content " + hash + ")";
 }
 
 std::string getPathForLock(const eacp::FilePath& lockPath, const std::string& path)
@@ -136,8 +152,9 @@ LockedPackage resolvePackage(const PackageCache& cache,
     printStatus("resolving " + request.name + " at '" + request.ref + "' from "
                 + request.url);
     auto materialized = cache.materialize(request, {}, Network::allowed);
-    printStatus("locked " + request.name + " at " + materialized.commit
-                + " (content " + materialized.hash + ")");
+    printStatus(
+        "locked " + request.name + " at "
+        + describeVersion(request.kind, materialized.commit, materialized.hash));
 
     return {request.name,
             request.kind,
@@ -160,7 +177,9 @@ eacp::FilePath ensureLockedPackageIsCached(const CommandOptions& options,
         return cache.getSourceDirectory(locked.hash);
 
     cache.removeEntry(locked.hash);
-    printStatus("fetching " + locked.name + " " + locked.commit + " into the cache");
+    printStatus("fetching " + locked.name + " "
+                + describeVersion(locked.kind, locked.commit, locked.hash)
+                + " into the cache");
     auto materialized = cache.materialize(request, locked.commit, network);
 
     for (const auto& submodule: materialized.submodules)
@@ -287,7 +306,7 @@ eacp::FilePath resolveLockedSource(const CommandOptions& options,
     auto lock = readLockFile(options.lock);
     auto request = PackageRequest {spec.name, spec.kind, spec.url, spec.ref, {}};
     request.submoduleSelection = spec.submoduleSelection;
-    request.archiveSha256 = spec.archiveSha256;
+    request.archiveHash = spec.archiveHash;
 
     for (const auto& patch: spec.patches)
         request.patches.add(makeAbsolute(options.requestedBy, patch));
@@ -319,34 +338,91 @@ eacp::FilePath resolveLockedSource(const CommandOptions& options,
         options, cache, request, *locked, getNetworkForMode(options.mode));
 }
 
+std::optional<SessionOverride> findOverride(const PackageSpec& spec,
+                                            const Session& session)
+{
+    if (auto overridden = session.findOverride(spec.name))
+        return overridden;
+
+    for (auto prefix: overridePrefixes)
+    {
+        auto variable =
+            std::string {prefix} + spec.name + std::string {overrideSuffix};
+
+        if (auto value = eacp::getEnv(variable); value && !value->empty())
+            return SessionOverride {spec.name, *value, variable};
+    }
+
+    return std::nullopt;
+}
+
+std::string getCheckoutStamp(const eacp::FilePath& checkout, const std::string& hash)
+{
+    return hash + " " + computeTreeStamp(checkout);
+}
+
+// SOURCE_DIR beside a repository or URL: the locked tree is copied there, and
+// copied again whenever the stamp kept in the build directory stops matching.
+eacp::FilePath placeCheckout(const CommandOptions& options,
+                             const PackageSpec& spec,
+                             const eacp::FilePath& cached)
+{
+    auto checkout =
+        makeAbsolute(options.requestedBinaryDirectory, spec.checkoutDirectory);
+    auto stampPath =
+        options.buildDirectory / "_lockstep" / "checkouts" / (spec.name + ".stamp");
+    auto hash = cached.fileName();
+
+    if (eacp::Files::isFile(stampPath) && eacp::Files::isDirectory(checkout)
+        && eacp::Files::readFile(stampPath) == getCheckoutStamp(checkout, hash))
+        return checkout;
+
+    printStatus("checking out " + spec.name + " into " + checkout.str());
+    eacp::Files::removeAll(checkout);
+
+    if (!eacp::Files::copyDirectory(cached, checkout))
+        throw std::runtime_error(formatUserError(
+            "lockstep could not copy " + spec.name + " into its SOURCE_DIR "
+                + checkout.str() + ".",
+            "Make " + checkout.str() + " writable, then configure again."));
+
+    eacp::Files::createDirectories(stampPath.parentDirectory());
+    eacp::Files::writeFile(stampPath,
+                           std::string_view {getCheckoutStamp(checkout, hash)});
+    return checkout;
+}
+
 eacp::FilePath resolvePackageSource(const CommandOptions& options,
                                     const PackageSpec& spec,
                                     const Session& session)
 {
-    auto overridden = session.findOverride(spec.name);
-
-    if (!overridden)
-        overridden = eacp::getEnv("LOCKSTEP_" + spec.name + "_SOURCE");
-
-    if (overridden && !overridden->empty())
+    if (auto overridden = findOverride(spec, session))
     {
+        auto setting = overridden->variable + "=" + overridden->sourceDirectory;
+
         if (options.isCI && options.mode == lockedMode)
         {
-            throw std::runtime_error("LOCKSTEP_" + spec.name + "_SOURCE overrides "
-                                     + spec.name + " with " + *overridden
-                                     + ", which LOCKSTEP_CI forbids in locked mode");
+            throw std::runtime_error(
+                formatUserError(setting + " overrides " + spec.name
+                                    + ", which LOCKSTEP_CI forbids in locked mode.",
+                                "Unset " + overridden->variable
+                                    + ", or configure without -DLOCKSTEP_CI=ON."));
         }
 
-        printStatus("WARNING: " + spec.name
-                    + " comes from the local override LOCKSTEP_" + spec.name
-                    + "_SOURCE=" + *overridden + ", not from the lock");
-        return makeAbsolute(options.sourceDirectory, *overridden);
+        printStatus("WARNING: " + spec.name + " comes from the local override "
+                    + setting + ", not from the lock");
+        return makeAbsolute(options.sourceDirectory, overridden->sourceDirectory);
     }
 
     if (spec.kind == "local")
         return makeAbsolute(options.requestedBy, spec.localSourceDirectory);
 
-    return resolveLockedSource(options, spec);
+    auto cached = resolveLockedSource(options, spec);
+
+    if (spec.checkoutDirectory.empty())
+        return cached;
+
+    return placeCheckout(options, spec, cached);
 }
 
 std::string getBinaryDirectory(const CommandOptions& options,
@@ -426,12 +502,25 @@ std::string writeFindPackageRedirect(const PackageSpec& spec)
              "set(PACKAGE_VERSION_EXACT TRUE)\\n\")\n";
 }
 
+// Every command that includes the snippet is a function, so the package's
+// variables are handed on to its caller, as CPM's cpm_export_variables does.
 std::string writePropagatingBlock(const std::string& name, const std::string& body)
 {
-    return "block(SCOPE_FOR VARIABLES PROPAGATE " + name + "_SOURCE_DIR " + name
-           + "_BINARY_DIR " + name + "_ADDED CPM_LAST_PACKAGE_NAME CPM_PACKAGE_"
-           + name + "_SOURCE_DIR CPM_PACKAGE_" + name + "_BINARY_DIR)\n" + body
-           + "endblock()\n";
+    auto propagated =
+        eacp::Vector<std::string> {name + "_SOURCE_DIR",
+                                   name + "_BINARY_DIR",
+                                   name + "_ADDED",
+                                   "CPM_LAST_PACKAGE_NAME",
+                                   "CPM_PACKAGE_" + name + "_SOURCE_DIR",
+                                   "CPM_PACKAGE_" + name + "_BINARY_DIR"};
+    auto snippet = "block(SCOPE_FOR VARIABLES PROPAGATE "
+                   + eacp::Strings::join(propagated, " ") + ")\n" + body
+                   + "endblock()\n";
+
+    for (const auto& variable: propagated)
+        snippet += "set(" + variable + " \"${" + variable + "}\" PARENT_SCOPE)\n";
+
+    return snippet;
 }
 
 std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
@@ -507,39 +596,37 @@ void checkLoadedDuringProject(const CommandOptions& options)
         + "/CMakeLists.txt and remove the include().");
 }
 
-bool isOverrideVariable(const std::string& variable)
-{
-    return variable.size() > overridePrefix.size() + overrideSuffix.size()
-           && variable.starts_with(overridePrefix)
-           && variable.ends_with(overrideSuffix);
-}
-
 SessionOverride parseOverride(const std::string& definition)
 {
     auto equals = definition.find('=');
     auto variable = definition.substr(0, equals);
 
-    if (equals == std::string::npos || !isOverrideVariable(variable))
+    for (auto prefix: overridePrefixes)
     {
-        throw std::runtime_error(
-            "--override takes LOCKSTEP_<Name>_SOURCE=<dir>, not " + definition);
+        if (equals == std::string::npos
+            || variable.size() <= prefix.size() + overrideSuffix.size()
+            || !variable.starts_with(prefix) || !variable.ends_with(overrideSuffix))
+            continue;
+
+        auto nameLength = variable.size() - prefix.size() - overrideSuffix.size();
+        return SessionOverride {variable.substr(prefix.size(), nameLength),
+                                definition.substr(equals + 1),
+                                variable};
     }
 
-    auto nameLength =
-        variable.size() - overridePrefix.size() - overrideSuffix.size();
-    return {variable.substr(overridePrefix.size(), nameLength),
-            definition.substr(equals + 1)};
+    throw std::runtime_error("--override takes LOCKSTEP_<Name>_SOURCE=<dir> or "
+                             "CPM_<Name>_SOURCE=<dir>, not "
+                             + definition);
 }
 } // namespace
 
 namespace
 {
-PackageSpec parseArgumentsFrom(const CommandOptions& options,
-                               ArgumentDialect dialect)
+PackageSpec parseArgumentsFrom(const CommandOptions& options)
 {
     try
     {
-        return parsePackageArguments(options.packageArguments, dialect);
+        return parsePackageArguments(options.packageArguments);
     }
     catch (const std::invalid_argument& error)
     {
@@ -572,20 +659,26 @@ int runBeginCommand(const CommandOptions& options)
             session.overrides.push_back(entry);
     }
 
+    std::stable_partition(
+        session.overrides.begin(),
+        session.overrides.end(),
+        [](const auto& entry)
+        { return entry.variable.starts_with(overridePrefixes[0]); });
+
     writeSession(options.buildDirectory, session);
     return 0;
 }
 
 int runAddCommand(const CommandOptions& options)
 {
-    auto spec = parseArgumentsFrom(options, ArgumentDialect::cpm);
+    auto spec = parseArgumentsFrom(options);
     writeSnippet(options, addPackage(options, spec));
     return 0;
 }
 
 int runProvideCommand(const CommandOptions& options)
 {
-    auto spec = parseArgumentsFrom(options, ArgumentDialect::fetchContent);
+    auto spec = parseArgumentsFrom(options);
 
     if (spec.kind == "local")
     {

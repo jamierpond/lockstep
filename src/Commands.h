@@ -23,6 +23,7 @@ struct CommandOptions
     eacp::FilePath bootstrap;
     eacp::FilePath requestedBy;
     eacp::FilePath requestedByFile;
+    eacp::FilePath requestedBinaryDirectory;
     eacp::FilePath output;
     std::string topLevelIncludes;
     eacp::Vector<std::string> overrides;

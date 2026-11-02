@@ -3,7 +3,7 @@
 include_guard(GLOBAL)
 
 set(LOCKSTEP_MODE locked CACHE STRING "locked, update or offline")
-option(LOCKSTEP_CI "Refuse LOCKSTEP_<Name>_SOURCE overrides in locked mode" OFF)
+option(LOCKSTEP_CI "Refuse <Name>_SOURCE overrides in locked mode" OFF)
 set(LOCKSTEP_LOCK_FILE "${CMAKE_SOURCE_DIR}/lockstep.lock" CACHE FILEPATH
         "The lock file lockstep reads and, in update mode, writes")
 
@@ -14,15 +14,13 @@ set(_LOCKSTEP_COMMAND "${CMAKE_COMMAND}" -E env "LOCKSTEP_EXECUTABLE=${LOCKSTEP_
         "--bootstrap=${LOCKSTEP_BOOTSTRAP}")
 
 get_cmake_property(_lockstep_variables VARIABLES)
-list(FILTER _lockstep_variables INCLUDE REGEX "^LOCKSTEP_.+_SOURCE$")
+list(FILTER _lockstep_variables INCLUDE REGEX "^(LOCKSTEP|CPM)_.+_SOURCE$")
 set(_lockstep_overrides)
 foreach (variable IN LISTS _lockstep_variables)
     list(APPEND _lockstep_overrides "--override=${variable}=${${variable}}")
 endforeach ()
 
-macro(_lockstep_execute)
-    execute_process(COMMAND ${_LOCKSTEP_COMMAND} ${ARGN}
-            RESULT_VARIABLE _lockstep_result ERROR_VARIABLE _lockstep_error)
+macro(_lockstep_report)
     string(STRIP "${_lockstep_error}" _lockstep_error)
     if (_lockstep_error)
         message("${_lockstep_error}")
@@ -32,36 +30,36 @@ macro(_lockstep_execute)
     endif ()
 endmacro()
 
-_lockstep_execute(begin ${_lockstep_overrides}
-        "--top-level-includes=${CMAKE_PROJECT_TOP_LEVEL_INCLUDES}")
-
-macro(_lockstep_run command)
-    _lockstep_execute(${command} "--requested-by=${CMAKE_CURRENT_SOURCE_DIR}"
-            "--requested-by-file=${CMAKE_CURRENT_LIST_FILE}"
-            "--output=${CMAKE_BINARY_DIR}/_lockstep/add.cmake" -- ${ARGN})
-    include("${CMAKE_BINARY_DIR}/_lockstep/add.cmake")
-endmacro()
-
-macro(lockstep_add_package)
-    _lockstep_run(add ${ARGV})
-endmacro()
-macro(CPMAddPackage)
-    _lockstep_run(add ${ARGV})
-endmacro()
-# Always fetches, never find_package(), so the build stays hermetic.
-macro(CPMFindPackage)
-    _lockstep_run(add ${ARGV})
-endmacro()
+execute_process(COMMAND ${_LOCKSTEP_COMMAND} begin ${_lockstep_overrides}
+        "--top-level-includes=${CMAKE_PROJECT_TOP_LEVEL_INCLUDES}"
+        RESULT_VARIABLE _lockstep_result ERROR_VARIABLE _lockstep_error)
+_lockstep_report()
+# Pasted into each command, so the arguments expand once and "a\;b" stays whole.
+set(_lockstep_run [=[
+    execute_process(COMMAND ${_LOCKSTEP_COMMAND} ${_lockstep_subcommand}
+            "--requested-by=${CMAKE_CURRENT_SOURCE_DIR}" "--requested-by-file=${CMAKE_CURRENT_LIST_FILE}"
+            "--requested-binary-dir=${CMAKE_CURRENT_BINARY_DIR}"
+            "--output=${CMAKE_BINARY_DIR}/_lockstep/add.cmake" -- ${_lockstep_arguments}
+            RESULT_VARIABLE _lockstep_result ERROR_VARIABLE _lockstep_error)
+    _lockstep_report()
+    include("${CMAKE_BINARY_DIR}/_lockstep/add.cmake")]=])
+# CPMFindPackage always fetches, never find_package(), so the build stays hermetic.
+foreach (command lockstep_add_package CPMAddPackage CPMFindPackage)
+    cmake_language(EVAL CODE "function(${command})
+        set(_lockstep_subcommand add)
+        set(_lockstep_arguments \"\${ARGN}\")\n${_lockstep_run}\nendfunction()")
+endforeach ()
 function(CPMDeclarePackage name)
     set_property(GLOBAL PROPERTY LOCKSTEP_DECLARED_${name} "${ARGN}")
 endfunction()
-macro(CPMGetPackage name)
-    get_property(_lockstep_declared GLOBAL PROPERTY LOCKSTEP_DECLARED_${name})
-    _lockstep_run(add NAME ${name} ${_lockstep_declared})
-endmacro()
+function(CPMGetPackage name)
+    get_property(declared GLOBAL PROPERTY LOCKSTEP_DECLARED_${name})
+    set(_lockstep_subcommand add)
+    set(_lockstep_arguments NAME ${name} ${declared})
+    cmake_language(EVAL CODE "${_lockstep_run}")
+endfunction()
 function(CPMUsePackageLock)
 endfunction()
-
 # include(CPM) finds this stub; a dependency's CPM.cmake returns when CPM_INITIALIZED.
 file(WRITE "${CMAKE_BINARY_DIR}/_lockstep/cpm/CPM.cmake" "# lockstep defines CPMAddPackage\n")
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_BINARY_DIR}/_lockstep/cpm")
@@ -71,10 +69,11 @@ set(CPM_FILE "${LOCKSTEP_BOOTSTRAP}")
 set(CPM_DOWNLOAD_LOCATION "${LOCKSTEP_BOOTSTRAP}")
 set_property(GLOBAL PROPERTY CPM_INITIALIZED true)
 macro(_lockstep_provide method name)
-    _lockstep_run(provide NAME ${name} ${ARGN})
+    set(_lockstep_subcommand provide)
+    set(_lockstep_arguments NAME ${name} ${ARGN})
+    cmake_language(EVAL CODE "${_lockstep_run}")
 endmacro()
 cmake_language(SET_DEPENDENCY_PROVIDER _lockstep_provide
         SUPPORTED_METHODS FETCHCONTENT_MAKEAVAILABLE_SERIAL)
-
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL
         execute_process COMMAND ${_LOCKSTEP_COMMAND} root --announce)
