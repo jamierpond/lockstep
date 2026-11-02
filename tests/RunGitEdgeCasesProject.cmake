@@ -62,12 +62,7 @@ commit_repository("${work}")
 
 set(fixture_url "file://${WORK_DIR}/fixtures")
 if (CMAKE_HOST_WIN32)
-    create_repository(staleContext)
-file(WRITE "${work}/source.h"
-        "#pragma once\n\n#include <bit>\n#include <execution>\n#include <new>\n\n#ifndef NDEBUG\n#include <iostream>\n#endif\n")
-commit_repository("${work}")
-
-set(fixture_url "file:///${WORK_DIR}/fixtures")
+    set(fixture_url "file:///${WORK_DIR}/fixtures")
 endif ()
 
 configure(TRUE update -DLOCKSTEP_MODE=update)
