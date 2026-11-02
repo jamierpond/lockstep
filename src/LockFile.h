@@ -30,10 +30,10 @@ struct LockFile
 {
     int version = lockFileFormatVersion;
     std::string root;
-    std::string shim;
+    std::string bootstrap;
     std::vector<LockedPackage> packages;
 
-    MIRO_REFLECT(version, root, shim, packages)
+    MIRO_REFLECT(version, root, bootstrap, packages)
 
     std::optional<LockedPackage> findPackage(const std::string& name) const;
     void storePackage(const LockedPackage& package);

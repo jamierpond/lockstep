@@ -7,11 +7,12 @@ dependencies that use CPM or FetchContent themselves go through it too.
 
 ## Use
 
-Copy or submodule this repository (only `cmake/lockstep.cmake` is needed),
-and load the shim during your top-level `project()`:
+Copy [`cmake/lockstep.cmake`](cmake/lockstep.cmake) into your project. It is
+the only file you commit: about 40 lines that pin a lockstep release and its
+per-platform SHA-256s. Load it during the top-level `project()`:
 
 ```cmake
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES ${CMAKE_CURRENT_LIST_DIR}/cmake/lockstep.cmake)
 project(MyApp)
 
@@ -60,12 +61,12 @@ lockstep root              # print the root hash
 Install it with `brew install jamierpond/tap/lockstep`, or on Windows
 `scoop bucket add jamierpond https://github.com/jamierpond/scoop-bucket` then
 `scoop install lockstep`. Run inside a project, an installed `lockstep` reads
-the version the project's shim pins and runs that exact release instead, so
+the version the project's `lockstep.cmake` pins and runs that exact release instead, so
 the lock is always written by the version the project builds with.
 
 ### Dependencies that use CPM or FetchContent
 
-The shim defines `CPMAddPackage`, `CPMFindPackage`, `CPMDeclarePackage`,
+The module defines `CPMAddPackage`, `CPMFindPackage`, `CPMDeclarePackage`,
 `CPMGetPackage` and `CPMUsePackageLock`, and sets `CPM_DIRECTORY`, so a
 dependency's own `include(CPM.cmake)` returns before defining anything and its
 packages land in your lock. `CPMFindPackage` always fetches; it never calls
@@ -76,8 +77,12 @@ not in the lock is an error naming the subproject that asked.
 ## How it works
 
 `cmake/lockstep.cmake` downloads the `lockstep` binary for the host from this
-repository's GitHub releases, checking the SHA-256 the shim pins, into
-`<cache>/bin/<version>/`. Each package call runs `lockstep resolve`, which
+repository's GitHub releases, checking the SHA-256 it pins, into
+`<cache>/bin/<version>/`, then includes the CMake module the binary writes
+(`cmake/lockstep-module.cmake` here, embedded in the binary, so it always
+matches it). Every command in that module forwards its arguments to the
+binary, which parses them, resolves the package and writes the CMake to run:
+the option variables, `<Name>_SOURCE_DIR` and the `add_subdirectory`. Resolving
 fetches into a bare git mirror in the cache, checks out the commit with
 line-ending conversion off, applies the patches, and stores the tree under
 `<cache>/src/<merkle hash>`. The Merkle hash covers each entry's name, type
@@ -120,8 +125,9 @@ cmake --build build && ctest --test-dir build
 The tests include configuring sample projects against real GitHub packages,
 so they need the network. `.github/workflows/build.yml` builds and tests all
 six targets on every push. Pushing a `v<version>` tag also publishes the
-binaries as a release with build provenance attestations, prints the
-`set(LOCKSTEP_SHA256_...)` lines to paste into the shim, and, when the
+binaries as a release with build provenance attestations, prints
+`cmake/lockstep.cmake` with that release's version and hashes filled in (also
+uploaded as the `bootstrap` artifact), and, when the
 `PACKAGING_TOKEN` secret holds a token that can push to them, updates the
 Homebrew formula in `jamierpond/homebrew-tap` and the Scoop manifest in
 `jamierpond/scoop-bucket` (repository variables `TAP_REPOSITORY` and

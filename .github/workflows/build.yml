@@ -138,18 +138,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --generate-notes
-      - name: Print the lines to paste into cmake/lockstep.cmake
+      - name: Print cmake/lockstep.cmake with this release's version and hashes
         run: |
           version="${{ steps.assets.outputs.version }}"
-          {
-            echo '```cmake'
-            echo "set(LOCKSTEP_VERSION $version)"
-            for platform in macos-arm64 macos-x64 windows-x64 windows-arm64 linux-x64 linux-arm64; do
-              hash=$(grep -E " lockstep-$version-$platform(\.exe)?$" release/SHA256SUMS | cut -d' ' -f1)
-              echo "set(LOCKSTEP_SHA256_$platform \"$hash\")"
-            done
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          bootstrap="$(sed "s/^set(LOCKSTEP_VERSION .*)$/set(LOCKSTEP_VERSION $version)/" cmake/lockstep.cmake)"
+          for platform in macos-arm64 macos-x64 windows-x64 windows-arm64 linux-x64 linux-arm64; do
+            hash=$(grep -E " lockstep-$version-$platform(\.exe)?$" release/SHA256SUMS | cut -d' ' -f1)
+            bootstrap="$(printf '%s\n' "$bootstrap" | sed "s/^set(LOCKSTEP_SHA256_$platform \".*\")$/set(LOCKSTEP_SHA256_$platform \"$hash\")/")"
+          done
+          printf '%s\n' "$bootstrap" > lockstep.cmake
+          { echo '```cmake'; cat lockstep.cmake; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap
+          path: lockstep.cmake
       - name: Update the Homebrew tap and the Scoop bucket
         if: env.PACKAGING_TOKEN != ''
         env:

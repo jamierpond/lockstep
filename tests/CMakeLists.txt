@@ -4,7 +4,7 @@ CPMAddPackage(
         GIT_TAG main)
 
 nano_add_executable(LockstepTests
-        SOURCES Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp
+        SOURCES Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp
         TARGETS lockstep-lib)
 
 function(add_consumer_project_test name expected_packages)

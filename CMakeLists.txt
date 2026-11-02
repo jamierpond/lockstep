@@ -4,7 +4,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0 CACHE STRING
         "Oldest macOS lockstep runs on; eacp-core links UniformTypeIdentifiers, which is 11.0+")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(lockstep VERSION 0.1.0 LANGUAGES C CXX)
+project(lockstep VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,13 +23,16 @@ CPMAddPackage(
         EXCLUDE_FROM_ALL YES)
 
 add_library(lockstep-lib STATIC
+        src/CMakeSnippet.cpp
         src/Commands.cpp
         src/Download.cpp
         src/Git.cpp
         src/LockFile.cpp
         src/MerkleHash.cpp
+        src/PackageArguments.cpp
         src/PackageCache.cpp
         src/PinnedRelease.cpp
+        src/Session.cpp
         src/Sha256.cpp)
 
 target_include_directories(lockstep-lib PUBLIC src)
@@ -37,6 +40,10 @@ target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)
 
 add_executable(lockstep src/Main.cpp)
 target_link_libraries(lockstep PRIVATE lockstep-lib)
+res_embed_add(lockstep
+        FILES cmake/lockstep-module.cmake
+        NAMESPACE LockstepModule
+        CATEGORY LockstepModule)
 target_compile_definitions(lockstep PRIVATE
         LOCKSTEP_VERSION="${PROJECT_VERSION}")
 
