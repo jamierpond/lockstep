@@ -2,6 +2,7 @@
 
 #include <eacp/Core/Utils/Containers.h>
 #include <eacp/Core/Utils/FilePath.h>
+#include <eacp/Core/Utils/TemporaryFile.h>
 
 #include "Git.h"
 #include "PackageArguments.h"
@@ -64,7 +65,7 @@ public:
 private:
     eacp::FilePath getMirrorDirectory(const std::string& url) const;
     eacp::FilePath getDownloadPath(const std::string& url) const;
-    eacp::FilePath createStagingDirectory() const;
+    eacp::TemporaryFile createStagingDirectory() const;
 
     std::string fetchGitTree(const PackageRequest& request,
                              const std::string& commit,
