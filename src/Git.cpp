@@ -1,4 +1,5 @@
 #include "Git.h"
+#include "Messages.h"
 
 #include <eacp/Core/Platform/Platform.h>
 #include <eacp/Core/Utils/Console.h>
@@ -75,16 +76,15 @@ bool isGitAttributesPath(const std::string& path)
            || path.ends_with("/" + std::string {gitAttributesFileName});
 }
 
-std::string getGitLfsInstallAdvice()
+std::string getGitLfsInstallCommand()
 {
     if constexpr (eacp::Platform::isWindows())
-        return "install the git-lfs package (winget install GitHub.GitLFS)";
+        return "winget install GitHub.GitLFS";
 
     if constexpr (eacp::Platform::isMac())
-        return "install the git-lfs package (brew install git-lfs)";
+        return "brew install git-lfs";
 
-    return "install the git-lfs package (sudo apt install git-lfs, "
-           "or your distribution's equivalent)";
+    return "sudo apt install git-lfs";
 }
 
 std::string_view removeSubmoduleKeySuffix(std::string_view key)
@@ -233,9 +233,10 @@ void fetchGitLfsObjects(const eacp::FilePath& mirror, const std::string& commit)
 {
     if (!runGit({"lfs", "version"}))
     {
-        throw std::runtime_error("this repository stores files in Git LFS, but "
-                                 "git-lfs is not installed; "
-                                 + getGitLfsInstallAdvice());
+        throw std::runtime_error(
+            formatUserError("this repository stores files in Git LFS, but the "
+                            "git-lfs package is not installed",
+                            getGitLfsInstallCommand()));
     }
 
     runGitOrThrow(createMirrorArguments(mirror, {"lfs", "fetch", "origin", commit}));
