@@ -12,67 +12,144 @@ namespace lockstep
 {
 namespace
 {
-constexpr auto valueKeywords =
-    std::to_array<std::string_view>({"NAME",
-                                     "VERSION",
-                                     "GIT_TAG",
-                                     "GITHUB",
-                                     "GITHUB_REPOSITORY",
-                                     "GITLAB_REPOSITORY",
-                                     "BITBUCKET_REPOSITORY",
-                                     "GIT_REPOSITORY",
-                                     "SOURCE_DIR",
-                                     "SOURCE_SUBDIR",
-                                     "URI",
-                                     "URL_HASH",
-                                     "URL_MD5",
-                                     "GIT_SUBMODULES_RECURSE"});
+enum class KeywordGroup
+{
+    value,
+    flag,
+    list,
+    ignored,
+    refused
+};
 
-// Accepted and without effect: lockstep fetches by exact commit, keys its
-// cache by content, and never calls find_package or runs a sub-build.
-constexpr auto ignoredValueKeywords =
-    std::to_array<std::string_view>({"GIT_SHALLOW",
-                                     "NO_CACHE",
-                                     "CUSTOM_CACHE_KEY",
-                                     "FIND_PACKAGE_ARGUMENTS",
-                                     "GIT_PROGRESS",
-                                     "DOWNLOAD_EXTRACT_TIMESTAMP",
-                                     "BINARY_DIR",
-                                     "SUBBUILD_DIR",
-                                     "TLS_VERIFY",
-                                     "GIT_REMOTE_UPDATE_STRATEGY",
-                                     "UPDATE_DISCONNECTED"});
-
-constexpr auto flagKeywords =
-    std::to_array<std::string_view>({"DOWNLOAD_ONLY",
-                                     "EXCLUDE_FROM_ALL",
-                                     "SYSTEM",
-                                     "OVERRIDE_FIND_PACKAGE",
-                                     "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR"});
-
-constexpr auto listKeywords = std::to_array<std::string_view>(
-    {"URL", "OPTIONS", "PATCHES", "GIT_SUBMODULES", "FIND_PACKAGE_ARGS"});
-
-struct RefusedKeyword
+struct KeywordRule
 {
     std::string_view keyword;
-    std::string_view reason;
+    KeywordGroup group;
+    std::string_view refusalReason = {};
 };
 
 constexpr auto commandReason =
     std::string_view {"runs a command whose result lockstep cannot lock or hash"};
+constexpr auto otherSourceReason = std::string_view {
+    "is a source lockstep cannot fetch; it locks git and archives"};
 
-constexpr auto refusedKeywords = std::to_array<RefusedKeyword>(
-    {RefusedKeyword {"DOWNLOAD_COMMAND", commandReason},
-     RefusedKeyword {"UPDATE_COMMAND", commandReason},
-     RefusedKeyword {"PATCH_COMMAND",
-                     "runs a command lockstep cannot hash; use PATCHES"},
-     RefusedKeyword {"CONFIGURE_COMMAND", commandReason},
-     RefusedKeyword {"BUILD_COMMAND", commandReason},
-     RefusedKeyword {"INSTALL_COMMAND", commandReason},
-     RefusedKeyword {
-         "FORCE",
-         "would add a second version of a package, and the lock holds one"}});
+// Every keyword CPMAddPackage, FetchContent_Declare and ExternalProject_Add
+// take. The ignored ones change how or where a fetch or sub-build runs, never
+// which sources arrive: lockstep fetches exact commits, keys its cache by
+// content and runs no sub-build. Anything not listed is refused as unknown.
+constexpr auto keywordRules = std::to_array<KeywordRule>(
+    {{"NAME", KeywordGroup::value},
+     {"VERSION", KeywordGroup::value},
+     {"GIT_TAG", KeywordGroup::value},
+     {"GITHUB", KeywordGroup::value},
+     {"GITHUB_REPOSITORY", KeywordGroup::value},
+     {"GITLAB_REPOSITORY", KeywordGroup::value},
+     {"BITBUCKET_REPOSITORY", KeywordGroup::value},
+     {"GIT_REPOSITORY", KeywordGroup::value},
+     {"SOURCE_DIR", KeywordGroup::value},
+     {"SOURCE_SUBDIR", KeywordGroup::value},
+     {"URI", KeywordGroup::value},
+     {"URL_HASH", KeywordGroup::value},
+     {"URL_MD5", KeywordGroup::value},
+     {"GIT_SUBMODULES_RECURSE", KeywordGroup::value},
+     {"DOWNLOAD_ONLY", KeywordGroup::flag},
+     {"EXCLUDE_FROM_ALL", KeywordGroup::flag},
+     {"SYSTEM", KeywordGroup::flag},
+     {"OVERRIDE_FIND_PACKAGE", KeywordGroup::flag},
+     {"EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR", KeywordGroup::flag},
+     {"URL", KeywordGroup::list},
+     {"OPTIONS", KeywordGroup::list},
+     {"PATCHES", KeywordGroup::list},
+     {"GIT_SUBMODULES", KeywordGroup::list},
+     {"FIND_PACKAGE_ARGS", KeywordGroup::list},
+     {"QUIET", KeywordGroup::ignored},
+     {"DOWNLOAD_NO_PROGRESS", KeywordGroup::ignored},
+     {"DOWNLOAD_NAME", KeywordGroup::ignored},
+     {"DOWNLOAD_EXTRACT_TIMESTAMP", KeywordGroup::ignored},
+     {"DOWNLOAD_DIR", KeywordGroup::ignored},
+     {"GIT_SHALLOW", KeywordGroup::ignored},
+     {"GIT_PROGRESS", KeywordGroup::ignored},
+     {"GIT_REMOTE_UPDATE_STRATEGY", KeywordGroup::ignored},
+     {"GIT_REMOTE_NAME", KeywordGroup::ignored},
+     {"GIT_CONFIG", KeywordGroup::ignored},
+     {"NO_CACHE", KeywordGroup::ignored},
+     {"CUSTOM_CACHE_KEY", KeywordGroup::ignored},
+     {"FIND_PACKAGE_ARGUMENTS", KeywordGroup::ignored},
+     {"UPDATE_DISCONNECTED", KeywordGroup::ignored},
+     {"TLS_VERIFY", KeywordGroup::ignored},
+     {"TLS_CAINFO", KeywordGroup::ignored},
+     {"TLS_VERSION", KeywordGroup::ignored},
+     {"TIMEOUT", KeywordGroup::ignored},
+     {"INACTIVITY_TIMEOUT", KeywordGroup::ignored},
+     {"NETRC", KeywordGroup::ignored},
+     {"NETRC_FILE", KeywordGroup::ignored},
+     {"HTTP_USERNAME", KeywordGroup::ignored},
+     {"HTTP_PASSWORD", KeywordGroup::ignored},
+     {"HTTP_HEADER", KeywordGroup::ignored},
+     {"LOG_DOWNLOAD", KeywordGroup::ignored},
+     {"LOG_UPDATE", KeywordGroup::ignored},
+     {"LOG_PATCH", KeywordGroup::ignored},
+     {"LOG_CONFIGURE", KeywordGroup::ignored},
+     {"LOG_BUILD", KeywordGroup::ignored},
+     {"LOG_INSTALL", KeywordGroup::ignored},
+     {"LOG_TEST", KeywordGroup::ignored},
+     {"LOG_MERGED_STDOUTERR", KeywordGroup::ignored},
+     {"LOG_OUTPUT_ON_FAILURE", KeywordGroup::ignored},
+     {"USES_TERMINAL_DOWNLOAD", KeywordGroup::ignored},
+     {"USES_TERMINAL_UPDATE", KeywordGroup::ignored},
+     {"USES_TERMINAL_PATCH", KeywordGroup::ignored},
+     {"USES_TERMINAL_CONFIGURE", KeywordGroup::ignored},
+     {"USES_TERMINAL_BUILD", KeywordGroup::ignored},
+     {"USES_TERMINAL_INSTALL", KeywordGroup::ignored},
+     {"USES_TERMINAL_TEST", KeywordGroup::ignored},
+     {"PREFIX", KeywordGroup::ignored},
+     {"TMP_DIR", KeywordGroup::ignored},
+     {"STAMP_DIR", KeywordGroup::ignored},
+     {"LOG_DIR", KeywordGroup::ignored},
+     {"BINARY_DIR", KeywordGroup::ignored},
+     {"SUBBUILD_DIR", KeywordGroup::ignored},
+     {"INSTALL_DIR", KeywordGroup::ignored},
+     {"CONFIGURE_COMMAND", KeywordGroup::ignored},
+     {"BUILD_COMMAND", KeywordGroup::ignored},
+     {"INSTALL_COMMAND", KeywordGroup::ignored},
+     {"TEST_COMMAND", KeywordGroup::ignored},
+     {"CMAKE_COMMAND", KeywordGroup::ignored},
+     {"CMAKE_GENERATOR", KeywordGroup::ignored},
+     {"CMAKE_GENERATOR_PLATFORM", KeywordGroup::ignored},
+     {"CMAKE_GENERATOR_TOOLSET", KeywordGroup::ignored},
+     {"CMAKE_GENERATOR_INSTANCE", KeywordGroup::ignored},
+     {"CMAKE_ARGS", KeywordGroup::ignored},
+     {"CMAKE_CACHE_ARGS", KeywordGroup::ignored},
+     {"CMAKE_CACHE_DEFAULT_ARGS", KeywordGroup::ignored},
+     {"CONFIGURE_HANDLED_BY_BUILD", KeywordGroup::ignored},
+     {"BUILD_IN_SOURCE", KeywordGroup::ignored},
+     {"BUILD_ALWAYS", KeywordGroup::ignored},
+     {"BUILD_BYPRODUCTS", KeywordGroup::ignored},
+     {"BUILD_JOB_SERVER_AWARE", KeywordGroup::ignored},
+     {"INSTALL_BYPRODUCTS", KeywordGroup::ignored},
+     {"TEST_BEFORE_INSTALL", KeywordGroup::ignored},
+     {"TEST_AFTER_INSTALL", KeywordGroup::ignored},
+     {"TEST_EXCLUDE_FROM_MAIN", KeywordGroup::ignored},
+     {"DEPENDS", KeywordGroup::ignored},
+     {"STEP_TARGETS", KeywordGroup::ignored},
+     {"INDEPENDENT_STEP_TARGETS", KeywordGroup::ignored},
+     {"LIST_SEPARATOR", KeywordGroup::ignored},
+     {"COMMAND", KeywordGroup::ignored},
+     {"EXCLUDE_FROM_ALL_STEPS", KeywordGroup::ignored},
+     {"DOWNLOAD_COMMAND", KeywordGroup::refused, commandReason},
+     {"UPDATE_COMMAND", KeywordGroup::refused, commandReason},
+     {"PATCH_COMMAND",
+      KeywordGroup::refused,
+      "runs a command lockstep cannot hash; use PATCHES"},
+     {"DOWNLOAD_NO_EXTRACT",
+      KeywordGroup::refused,
+      "keeps the archive unextracted, and lockstep locks extracted trees"},
+     {"SVN_REPOSITORY", KeywordGroup::refused, otherSourceReason},
+     {"HG_REPOSITORY", KeywordGroup::refused, otherSourceReason},
+     {"CVS_REPOSITORY", KeywordGroup::refused, otherSourceReason},
+     {"FORCE",
+      KeywordGroup::refused,
+      "would add a second version of a package, and the lock holds one"}});
 
 constexpr auto hashAlgorithms = std::to_array<std::string_view>({"MD5",
                                                                  "SHA1",
@@ -115,22 +192,22 @@ bool isOneOfIgnoringCase(const std::array<std::string_view, Size>& words,
                        { return eacp::Strings::equalsCaseInsensitive(word, text); });
 }
 
-std::optional<std::string_view> findRefusalReason(std::string_view keyword)
+std::optional<KeywordRule> findKeywordRule(std::string_view keyword)
 {
-    for (const auto& refused: refusedKeywords)
-    {
-        if (refused.keyword == keyword)
-            return refused.reason;
-    }
+    auto found =
+        std::find_if(keywordRules.begin(),
+                     keywordRules.end(),
+                     [&](const auto& rule) { return rule.keyword == keyword; });
 
-    return std::nullopt;
+    if (found == keywordRules.end())
+        return std::nullopt;
+
+    return *found;
 }
 
 bool isKeyword(std::string_view text)
 {
-    return isOneOf(valueKeywords, text) || isOneOf(ignoredValueKeywords, text)
-           || isOneOf(flagKeywords, text) || isOneOf(listKeywords, text)
-           || findRefusalReason(text).has_value();
+    return findKeywordRule(text).has_value();
 }
 
 bool isArchiveUrl(std::string_view url)
@@ -179,8 +256,19 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
     while (index < arguments.size())
     {
         const auto& keyword = arguments[index++];
+        auto rule = findKeywordRule(keyword);
 
-        if (isOneOf(flagKeywords, keyword))
+        if (!rule)
+        {
+            throw std::invalid_argument("lockstep does not know the option '"
+                                        + keyword + "'");
+        }
+
+        if (rule->group == KeywordGroup::refused)
+            throw std::invalid_argument(keyword + " "
+                                        + std::string {rule->refusalReason});
+
+        if (rule->group == KeywordGroup::flag)
         {
             auto isSet = true;
 
@@ -189,35 +277,22 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
 
             collected.flags.emplace(keyword, isSet);
         }
-        else if (auto reason = findRefusalReason(keyword))
-        {
-            throw std::invalid_argument(keyword + " " + std::string {*reason});
-        }
-        else if (isOneOf(ignoredValueKeywords, keyword))
-        {
-            if (index < arguments.size() && !isKeyword(arguments[index]))
-                ++index;
-        }
-        else if (isOneOf(valueKeywords, keyword))
+        else if (rule->group == KeywordGroup::value)
         {
             if (index >= arguments.size())
                 throw std::invalid_argument(keyword + " needs a value");
 
             collected.values.emplace(keyword, arguments[index++]);
         }
-        else if (isOneOf(listKeywords, keyword))
+        else
         {
             auto list = std::vector<std::string> {};
 
             while (index < arguments.size() && !isKeyword(arguments[index]))
                 list.push_back(arguments[index++]);
 
-            collected.lists.emplace(keyword, list);
-        }
-        else
-        {
-            throw std::invalid_argument("lockstep does not know the option '"
-                                        + keyword + "'");
+            if (rule->group == KeywordGroup::list)
+                collected.lists.emplace(keyword, list);
         }
     }
 
@@ -361,6 +436,19 @@ void setSourceFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
     spec.checkoutDirectory = keywords.findValue("SOURCE_DIR").value_or("");
 }
 } // namespace
+
+std::vector<std::string_view> listIgnoredKeywords()
+{
+    auto ignored = std::vector<std::string_view> {};
+
+    for (const auto& rule: keywordRules)
+    {
+        if (rule.group == KeywordGroup::ignored)
+            ignored.push_back(rule.keyword);
+    }
+
+    return ignored;
+}
 
 bool isCMakeTrue(std::string_view value)
 {
