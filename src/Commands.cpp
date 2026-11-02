@@ -339,6 +339,17 @@ void writeFindModule(const CommandOptions& options, const std::string& name)
                            std::string_view {body});
 }
 
+// A project's own include(CPM) finds this instead of a CPM.cmake of its own.
+void writeCPMStub(const CommandOptions& options)
+{
+    auto directory = getFindModuleDirectory(options);
+    eacp::Files::removeAll(directory);
+    eacp::Files::createDirectories(directory);
+    eacp::Files::writeFile(
+        directory / "CPM.cmake",
+        std::string_view {"# lockstep defines the CPM commands.\n"});
+}
+
 std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
 {
     auto session = readSession(options.buildDirectory);
@@ -453,7 +464,7 @@ int runBeginCommand(const CommandOptions& options)
     }
 
     writeSession(options.buildDirectory, session);
-    eacp::Files::removeAll(getFindModuleDirectory(options));
+    writeCPMStub(options);
     return 0;
 }
 

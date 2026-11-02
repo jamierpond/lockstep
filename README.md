@@ -72,7 +72,9 @@ dependency's own `include(CPM.cmake)` returns before defining anything and its
 packages land in your lock. `CPMFindPackage` always fetches; it never calls
 `find_package`. As in CPM, each added package writes a `Find<Name>.cmake` into
 `<build>/_lockstep/modules`, which is first on `CMAKE_MODULE_PATH`, so a later
-`find_package(<Name>)` gets the package already added. `FetchContent_MakeAvailable` goes through lockstep as a CMake
+`find_package(<Name>)` gets the package already added. The same directory
+holds a `CPM.cmake` that defines nothing, so a project's own `include(CPM)`
+keeps working with its copy of CPM deleted. `FetchContent_MakeAvailable` goes through lockstep as a CMake
 dependency provider. In locked mode, a package any of them asks for that is
 not in the lock is an error naming the subproject that asked.
 
