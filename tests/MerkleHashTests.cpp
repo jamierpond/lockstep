@@ -1,6 +1,9 @@
 #include "TestDirectory.h"
 
+#include <LongPath.h>
 #include <MerkleHash.h>
+
+#include <fstream>
 
 #include <NanoTest/NanoTest.h>
 
@@ -16,6 +19,25 @@ eacp::FilePath createSampleTree(const std::string& name)
     writeTestFile(root / "CMakeLists.txt", "project(sample)\n");
     writeTestFile(root / "src" / "a.cpp", "int a;\n");
     writeTestFile(root / "src" / "b.cpp", "int b;\n");
+    return root;
+}
+
+constexpr auto windowsMaxPathLength = std::size_t {260};
+constexpr auto deepDirectoryNameLength = std::size_t {50};
+constexpr auto deepDirectoryCount = 6;
+
+eacp::FilePath createTreeDeeperThanMaxPath(const std::string& name)
+{
+    auto root = createEmptyTestDirectory(name);
+    auto deepest = root;
+
+    for (auto level = 0; level < deepDirectoryCount; ++level)
+        deepest = deepest / std::string(deepDirectoryNameLength, 'a' + level);
+
+    auto file = deepest / "box_curve25519xchacha20poly1305.c";
+    std::filesystem::create_directories(lockstep::getLongPathSafeStdPath(deepest));
+    std::ofstream {lockstep::getLongPathSafeStdPath(file)} << "int deep;\n";
+    check(file.str().size() > windowsMaxPathLength);
     return root;
 }
 } // namespace MerkleHashTests
@@ -74,4 +96,16 @@ auto tStampTracksChanges = test("Merkle/stampChangesWhenAFileGrows") = []
     check(computeTreeStamp(tree) == before);
     writeTestFile(tree / "src" / "a.cpp", "int a = 1;\n");
     check(computeTreeStamp(tree) != before);
+};
+
+auto tLongPaths = test("Merkle/hashesAndRemovesTreesDeeperThanMaxPath") = []
+{
+    auto first = MerkleHashTests::createTreeDeeperThanMaxPath("merkle-long-first");
+    auto second = MerkleHashTests::createTreeDeeperThanMaxPath("merkle-long-second");
+    check(computeMerkleHash(first) == computeMerkleHash(second));
+    check(!computeTreeStamp(first).empty());
+
+    lockstep::removeTreeAtAnyLength(first);
+    lockstep::removeTreeAtAnyLength(second);
+    check(!std::filesystem::exists(lockstep::getLongPathSafeStdPath(first)));
 };
