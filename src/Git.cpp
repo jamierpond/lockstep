@@ -320,8 +320,21 @@ std::vector<GitSubmodule> listSubmodules(const GitTreeListing& listing,
     return submodules;
 }
 
-void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch)
+eacp::FilePath findGitBundledPatch()
 {
-    runGitOrThrow({"-C", tree.str(), "apply", "--whitespace=nowarn", patch.str()});
+    // Git for Windows ships patch.exe in usr/bin beside libexec/git-core, which
+    // is where CPM looks too.
+    constexpr auto levelsAboveGitInstall = 3;
+    auto execPath = runGit({"--exec-path"});
+
+    if (!execPath)
+        return {};
+
+    auto install = eacp::FilePath {*execPath};
+
+    for (auto level = 0; level < levelsAboveGitInstall; ++level)
+        install = install.parentDirectory();
+
+    return install / "usr" / "bin" / "patch.exe";
 }
 } // namespace lockstep

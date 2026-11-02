@@ -70,5 +70,6 @@ struct GitSubmodule
 std::vector<GitSubmodule> listSubmodules(const GitTreeListing& listing,
                                          const eacp::FilePath& tree);
 
-void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch);
+// The patch.exe Git for Windows installs, or an empty path when git is missing.
+eacp::FilePath findGitBundledPatch();
 } // namespace lockstep

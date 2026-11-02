@@ -12,7 +12,7 @@ curl_version=8.23.0
 curl_sha256=e3de77cfa6367083c776a26647fc9f633b538c06c3baa73d931a252ac8f72b49
 curl_prefix=/opt/curl-static
 
-apk add --no-cache build-base cmake ninja git git-lfs curl linux-headers file binutils \
+apk add --no-cache build-base cmake ninja git git-lfs patch curl linux-headers file binutils \
     perl mbedtls-dev mbedtls-static ca-certificates
 git config --global --add safe.directory '*'
 
