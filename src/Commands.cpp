@@ -555,11 +555,11 @@ int runBeginCommand(const CommandOptions& options)
 
     if (options.mode != updateMode && !isLockFileCurrent(options.lock))
     {
-        printStatus(
-            "WARNING: " + options.lock.str()
-            + " is not in the form this lockstep writes (it is from another "
-              "version, or was edited by hand). Rewrite it with: cmake -B <build> "
-              "-DLOCKSTEP_MODE=update");
+        printStatus(formatUserError(
+            options.lock.str()
+                + " is not in the form this lockstep writes: it is from another "
+                  "version or was edited by hand. Rewrite it with:",
+            "cmake -B <build> -DLOCKSTEP_MODE=update"));
     }
 
     auto session = Session {};
@@ -660,16 +660,19 @@ int runVerifyCommand(const CommandOptions& options)
 
     if (!isLockFileCurrent(options.lock))
     {
-        printStatus("FAILED: " + options.lock.str()
-                    + " is not in the form this lockstep writes; rewrite it with "
-                      "lockstep update");
+        printStatus(formatUserError(options.lock.str()
+                                        + " is not in the form this lockstep "
+                                          "writes. Rewrite it with:",
+                                    "lockstep update"));
         ++failedCount;
     }
 
     if (lock.root != lock.computeRootHash())
     {
-        printStatus("FAILED: the root hash in " + options.lock.str()
-                    + " does not match its packages");
+        printStatus(formatUserError("the root hash in " + options.lock.str()
+                                        + " does not match its packages, so it was "
+                                          "edited by hand. Rewrite it with:",
+                                    "lockstep update"));
         ++failedCount;
     }
 
