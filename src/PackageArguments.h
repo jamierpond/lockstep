@@ -43,6 +43,10 @@ struct PackageSpec
 // option lockstep does not know or cannot honour.
 PackageSpec parsePackageArguments(const std::vector<std::string>& arguments);
 
+// The keywords accepted and ignored because they never change which sources
+// are fetched: progress, logging, TLS, timeouts, sub-build steps and so on.
+std::vector<std::string_view> listIgnoredKeywords();
+
 // CMake's if() constants: ON/YES/TRUE/Y/1, and OFF/NO/FALSE/N/0/IGNORE or empty.
 bool isCMakeTrue(std::string_view value);
 bool isCMakeFalse(std::string_view value);
