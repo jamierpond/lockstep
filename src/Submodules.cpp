@@ -21,6 +21,19 @@ std::string removeLastComponent(std::string url)
 }
 } // namespace
 
+bool isSameSelection(const SubmoduleSelection& first,
+                     const SubmoduleSelection& second)
+{
+    return first.isRestricted == second.isRestricted && first.paths == second.paths
+           && first.isRecursive == second.isRecursive;
+}
+
+bool isSameSubmodule(const LockedSubmodule& first, const LockedSubmodule& second)
+{
+    return first.path == second.path && first.url == second.url
+           && first.commit == second.commit;
+}
+
 std::string resolveSubmoduleUrl(const std::string& parentUrl, const std::string& url)
 {
     if (!url.starts_with(parentPrefix) && !url.starts_with(currentPrefix))

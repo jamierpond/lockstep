@@ -28,6 +28,10 @@ struct LockedSubmodule
     MIRO_REFLECT(path, url, commit)
 };
 
+bool isSameSelection(const SubmoduleSelection& first,
+                     const SubmoduleSelection& second);
+bool isSameSubmodule(const LockedSubmodule& first, const LockedSubmodule& second);
+
 // A .gitmodules URL made absolute: "../b.git" or "./b" resolved against the
 // URL of the repository that lists it, as git does.
 std::string resolveSubmoduleUrl(const std::string& parentUrl,

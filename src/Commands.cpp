@@ -71,6 +71,7 @@ PackageRequest createRequestFromLock(const eacp::FilePath& lockPath,
 {
     auto request = PackageRequest {
         package.name, package.kind, package.url, package.requestedRef, {}};
+    request.submoduleSelection = package.submoduleSelection;
 
     for (const auto& patch: package.patches)
         request.patches.add(getPathFromLock(lockPath, patch));
@@ -113,9 +114,10 @@ eacp::FilePath ensureLockedPackageIsCached(const PackageCache& cache,
 
     for (const auto& submodule: materialized.submodules)
     {
-        auto isLocked =
-            std::find(locked.submodules.begin(), locked.submodules.end(), submodule)
-            != locked.submodules.end();
+        auto isLocked = std::any_of(locked.submodules.begin(),
+                                    locked.submodules.end(),
+                                    [&](const auto& entry)
+                                    { return isSameSubmodule(entry, submodule); });
 
         if (!isLocked)
         {
@@ -188,7 +190,8 @@ void checkRequestMatchesLock(const CommandOptions& options,
 {
     if (locked.url == spec.url && locked.requestedRef == spec.ref
         && locked.kind == spec.kind
-        && locked.patches == getPatchesForLock(options, spec))
+        && locked.patches == getPatchesForLock(options, spec)
+        && isSameSelection(locked.submoduleSelection, spec.submoduleSelection))
         return;
 
     throw std::runtime_error(
