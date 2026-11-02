@@ -1,6 +1,7 @@
 #include "Commands.h"
 #include "CMakeSnippet.h"
 #include "LockFile.h"
+#include "Messages.h"
 #include "PackageArguments.h"
 #include "PackageCache.h"
 #include "Session.h"
@@ -8,6 +9,7 @@
 #include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Environment.h>
 #include <eacp/Core/Utils/Files.h>
+#include <eacp/Core/Utils/Format.h>
 #include <eacp/Core/Utils/StdPath.h>
 #include <eacp/Core/Utils/Strings.h>
 
@@ -78,6 +80,42 @@ eacp::FilePath makeAbsolute(const eacp::FilePath& base, const std::string& path)
         (eacp::toStdPath(base) / eacp::toStdPath(asPath)).lexically_normal()};
 }
 
+std::string getPathForUser(const CommandOptions& options, const eacp::FilePath& path)
+{
+    auto projectDirectory = eacp::toStdPath(options.sourceDirectory);
+
+    if (projectDirectory.empty())
+        projectDirectory = std::filesystem::current_path();
+
+    auto relative = eacp::toStdPath(path).lexically_relative(projectDirectory);
+    auto isInsideProject = !relative.empty() && *relative.begin() != "..";
+
+    if (!isInsideProject)
+        return path.str();
+
+    return eacp::FilePath {relative}.str();
+}
+
+eacp::FilePath getRequestingFile(const CommandOptions& options)
+{
+    if (eacp::Files::isFile(options.requestedByFile))
+        return options.requestedByFile;
+
+    return options.requestedBy / "CMakeLists.txt";
+}
+
+RequestLocation getRequestLocation(const CommandOptions& options,
+                                   const std::string& name)
+{
+    auto file = getRequestingFile(options);
+
+    if (!eacp::Files::isFile(file))
+        return {getPathForUser(options, options.requestedBy), std::nullopt};
+
+    return {getPathForUser(options, file),
+            findPackageRequestLine(eacp::Files::readFile(file), name)};
+}
+
 PackageRequest createRequestFromLock(const eacp::FilePath& lockPath,
                                      const LockedPackage& package)
 {
@@ -112,7 +150,8 @@ LockedPackage resolvePackage(const PackageCache& cache,
             materialized.hash};
 }
 
-eacp::FilePath ensureLockedPackageIsCached(const PackageCache& cache,
+eacp::FilePath ensureLockedPackageIsCached(const CommandOptions& options,
+                                           const PackageCache& cache,
                                            const PackageRequest& request,
                                            const LockedPackage& locked,
                                            Network network)
@@ -151,10 +190,8 @@ eacp::FilePath ensureLockedPackageIsCached(const PackageCache& cache,
 
     if (materialized.hash != locked.hash)
     {
-        throw std::runtime_error(
-            locked.name + "'s content hashes to " + materialized.hash
-            + " but the lock says " + locked.hash
-            + "; the source changed under the same commit or URL");
+        throw std::runtime_error(describeChangedContent(
+            {locked.name, locked.url, getPathForUser(options, options.lock)}));
     }
 
     return materialized.sourceDirectory;
@@ -196,22 +233,49 @@ std::vector<std::string> getPatchesForLock(const CommandOptions& options,
     return patches;
 }
 
+std::string describeRequest(const std::string& url,
+                            const std::string& ref,
+                            const std::string& otherUrl)
+{
+    if (url != otherUrl)
+        return eacp::Strings::format("from {} at '{}'", url, ref);
+
+    return eacp::Strings::format("at '{}'", ref);
+}
+
 void checkRequestMatchesLock(const CommandOptions& options,
                              const PackageSpec& spec,
                              const LockedPackage& locked)
 {
-    if (locked.url == spec.url && locked.requestedRef == spec.ref
-        && locked.kind == spec.kind
-        && locked.patches == getPatchesForLock(options, spec)
-        && isSameSelection(locked.submoduleSelection, spec.submoduleSelection))
+    auto isSameSource = locked.url == spec.url && locked.requestedRef == spec.ref
+                        && locked.kind == spec.kind;
+    auto isSamePatches = locked.patches == getPatchesForLock(options, spec);
+    auto isSameSubmodules =
+        isSameSelection(locked.submoduleSelection, spec.submoduleSelection);
+
+    if (isSameSource && isSamePatches && isSameSubmodules)
         return;
 
-    throw std::runtime_error(
-        options.requestedBy.str() + " asks for " + spec.name + " from " + spec.url
-        + " at '" + spec.ref + "', but " + options.lock.str() + " locks it from "
-        + locked.url + " at '" + locked.requestedRef
-        + "' (or with other patches or submodules). Configure with -DLOCKSTEP_MODE=update to "
-          "re-lock it.");
+    auto mismatch =
+        LockMismatch {getRequestLocation(options, spec.name),
+                      spec.name,
+                      getPathForUser(options, options.lock),
+                      describeRequest(spec.url, spec.ref, locked.url),
+                      describeRequest(locked.url, locked.requestedRef, spec.url),
+                      getPathForUser(options, options.buildDirectory)};
+
+    if (isSameSource && !isSamePatches)
+    {
+        mismatch.requestedDescription = "with other patches";
+        mismatch.lockedDescription = "with the patches it records";
+    }
+    else if (isSameSource)
+    {
+        mismatch.requestedDescription = "with other submodules";
+        mismatch.lockedDescription = "with the submodules it records";
+    }
+
+    throw std::runtime_error(describeLockMismatch(mismatch));
 }
 
 eacp::FilePath resolveLockedSource(const CommandOptions& options,
@@ -242,15 +306,17 @@ eacp::FilePath resolveLockedSource(const CommandOptions& options,
 
     if (!locked)
     {
-        throw std::runtime_error(options.requestedBy.str() + " asks for package "
-                                 + spec.name + ", which " + options.lock.str()
-                                 + " does not lock. Configure with "
-                                   "-DLOCKSTEP_MODE=update to add it.");
+        throw std::runtime_error(describeUnlockedRequest(
+            {getRequestLocation(options, spec.name),
+             spec.name,
+             getPathForUser(options, options.lock),
+             eacp::Files::isFile(options.lock),
+             getPathForUser(options, options.buildDirectory)}));
     }
 
     checkRequestMatchesLock(options, spec, *locked);
     return ensureLockedPackageIsCached(
-        cache, request, *locked, getNetworkForMode(options.mode));
+        options, cache, request, *locked, getNetworkForMode(options.mode));
 }
 
 eacp::FilePath resolvePackageSource(const CommandOptions& options,
@@ -544,7 +610,15 @@ int runUpdateCommand(const CommandOptions& options)
     for (const auto& name: options.names)
     {
         if (!lock.findPackage(name))
-            throw std::runtime_error(name + " is not in " + options.lock.str());
+        {
+            auto lockedNames = eacp::Vector<std::string> {};
+
+            for (const auto& package: lock.packages)
+                lockedNames.add(package.name);
+
+            throw std::runtime_error(describeUnknownUpdateName(
+                {name, getPathForUser(options, options.lock), lockedNames}));
+        }
     }
 
     for (const auto& package: lock.packages)
@@ -577,9 +651,10 @@ int runVerifyCommand(const CommandOptions& options)
             continue;
         }
 
-        printStatus("FAILED " + package.name + ": "
-                    + cache.getSourceDirectory(package.hash).str()
-                    + " is missing or no longer hashes to " + package.hash);
+        printStatus(
+            "FAILED " + package.name + ": "
+            + describeDamagedCacheEntry(
+                {package.name, cache.getSourceDirectory(package.hash).str()}));
         ++failedCount;
     }
 

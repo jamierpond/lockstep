@@ -37,7 +37,7 @@ set(common_arguments
         "-DLOCKSTEP_CACHE=${WORK_DIR}/cache"
         -DCMAKE_BUILD_TYPE=Release)
 
-expect_failure("asks for package .* which .*lockstep.lock does not lock"
+expect_failure("CMakeLists.txt:[0-9]+ asks for .*, and there is no lockstep.lock yet"
         "${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-missing-lock")
 
 run_step("${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-update"

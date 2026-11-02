@@ -28,6 +28,7 @@ execute_process(COMMAND ${_LOCKSTEP_COMMAND} begin ${_lockstep_overrides}
 macro(_lockstep_run command)
     execute_process(COMMAND ${_LOCKSTEP_COMMAND} ${command}
             "--requested-by=${CMAKE_CURRENT_SOURCE_DIR}"
+            "--requested-by-file=${CMAKE_CURRENT_LIST_FILE}"
             "--output=${CMAKE_BINARY_DIR}/_lockstep/add.cmake" -- ${ARGN}
             COMMAND_ERROR_IS_FATAL ANY)
     include("${CMAKE_BINARY_DIR}/_lockstep/add.cmake")
