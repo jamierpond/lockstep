@@ -1,5 +1,7 @@
 #include "PackageArguments.h"
 
+#include <eacp/Core/Utils/Strings.h>
+
 #include <algorithm>
 #include <array>
 #include <stdexcept>
@@ -10,7 +12,7 @@ namespace lockstep
 namespace
 {
 constexpr auto valueKeywords =
-    std::array<std::string_view, 17> {"NAME",
+    std::array<std::string_view, 13> {"NAME",
                                       "VERSION",
                                       "GIT_TAG",
                                       "GITHUB",
@@ -21,22 +23,55 @@ constexpr auto valueKeywords =
                                       "SOURCE_DIR",
                                       "SOURCE_SUBDIR",
                                       "URI",
-                                      "FORCE",
-                                      "GIT_SHALLOW",
-                                      "CUSTOM_CACHE_KEY",
+                                      "URL_HASH",
+                                      "GIT_SUBMODULES_RECURSE"};
+
+// Accepted and without effect: lockstep fetches by exact commit, keys its
+// cache by content, and never calls find_package or runs a sub-build.
+constexpr auto ignoredValueKeywords =
+    std::array<std::string_view, 11> {"GIT_SHALLOW",
                                       "NO_CACHE",
+                                      "CUSTOM_CACHE_KEY",
                                       "FIND_PACKAGE_ARGUMENTS",
-                                      "URL_HASH"};
+                                      "GIT_PROGRESS",
+                                      "DOWNLOAD_EXTRACT_TIMESTAMP",
+                                      "BINARY_DIR",
+                                      "SUBBUILD_DIR",
+                                      "TLS_VERIFY",
+                                      "GIT_REMOTE_UPDATE_STRATEGY",
+                                      "UPDATE_DISCONNECTED"};
 
 constexpr auto flagKeywords =
-    std::array<std::string_view, 3> {"DOWNLOAD_ONLY", "EXCLUDE_FROM_ALL", "SYSTEM"};
+    std::array<std::string_view, 5> {"DOWNLOAD_ONLY",
+                                     "EXCLUDE_FROM_ALL",
+                                     "SYSTEM",
+                                     "OVERRIDE_FIND_PACKAGE",
+                                     "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR"};
 
-constexpr auto listKeywords = std::array<std::string_view, 6> {"URL",
-                                                               "OPTIONS",
-                                                               "PATCHES",
-                                                               "PATCH_COMMAND",
-                                                               "DOWNLOAD_COMMAND",
-                                                               "FIND_PACKAGE_ARGS"};
+constexpr auto listKeywords = std::array<std::string_view, 5> {
+    "URL", "OPTIONS", "PATCHES", "GIT_SUBMODULES", "FIND_PACKAGE_ARGS"};
+
+struct RefusedKeyword
+{
+    std::string_view keyword;
+    std::string_view reason;
+};
+
+constexpr auto commandReason =
+    std::string_view {"runs a command whose result lockstep cannot lock or hash"};
+
+constexpr auto refusedKeywords = std::array<RefusedKeyword, 8> {
+    RefusedKeyword {"DOWNLOAD_COMMAND", commandReason},
+    RefusedKeyword {"UPDATE_COMMAND", commandReason},
+    RefusedKeyword {"PATCH_COMMAND",
+                    "runs a command lockstep cannot hash; use PATCHES"},
+    RefusedKeyword {"CONFIGURE_COMMAND", commandReason},
+    RefusedKeyword {"BUILD_COMMAND", commandReason},
+    RefusedKeyword {"INSTALL_COMMAND", commandReason},
+    RefusedKeyword {"URL_MD5",
+                    "is not checked by lockstep; use URL_HASH SHA256=<hex>"},
+    RefusedKeyword {
+        "FORCE", "would add a second version of a package, and the lock holds one"}};
 
 constexpr auto archiveExtensions = std::array<std::string_view, 7> {
     ".zip", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar"};
@@ -53,10 +88,38 @@ bool isOneOf(const std::array<std::string_view, Size>& words, std::string_view t
     return std::find(words.begin(), words.end(), text) != words.end();
 }
 
+bool isBooleanWord(std::string_view text)
+{
+    return std::any_of(booleanWords.begin(),
+                       booleanWords.end(),
+                       [&](auto word)
+                       { return eacp::Strings::equalsCaseInsensitive(word, text); });
+}
+
+bool isFalseWord(std::string_view text)
+{
+    return std::any_of(falseWords.begin(),
+                       falseWords.end(),
+                       [&](auto word)
+                       { return eacp::Strings::equalsCaseInsensitive(word, text); });
+}
+
+std::optional<std::string_view> findRefusalReason(std::string_view keyword)
+{
+    for (const auto& refused: refusedKeywords)
+    {
+        if (refused.keyword == keyword)
+            return refused.reason;
+    }
+
+    return std::nullopt;
+}
+
 bool isKeyword(std::string_view text)
 {
-    return isOneOf(valueKeywords, text) || isOneOf(flagKeywords, text)
-           || isOneOf(listKeywords, text);
+    return isOneOf(valueKeywords, text) || isOneOf(ignoredValueKeywords, text)
+           || isOneOf(flagKeywords, text) || isOneOf(listKeywords, text)
+           || findRefusalReason(text).has_value();
 }
 
 bool hasSuffix(std::string_view text, std::string_view suffix)
@@ -133,10 +196,19 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
         {
             auto isSet = true;
 
-            if (index < arguments.size() && isOneOf(booleanWords, arguments[index]))
-                isSet = !isOneOf(falseWords, arguments[index++]);
+            if (index < arguments.size() && isBooleanWord(arguments[index]))
+                isSet = !isFalseWord(arguments[index++]);
 
             collected.flags.emplace_back(keyword, isSet);
+        }
+        else if (auto reason = findRefusalReason(keyword))
+        {
+            throw std::invalid_argument(keyword + " " + std::string {*reason});
+        }
+        else if (isOneOf(ignoredValueKeywords, keyword))
+        {
+            if (index < arguments.size() && !isKeyword(arguments[index]))
+                ++index;
         }
         else if (isOneOf(valueKeywords, keyword))
         {
@@ -153,6 +225,11 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
                 list.push_back(arguments[index++]);
 
             collected.lists.emplace_back(keyword, list);
+        }
+        else
+        {
+            throw std::invalid_argument("lockstep does not know the option '"
+                                        + keyword + "'");
         }
     }
 
@@ -222,6 +299,21 @@ std::vector<std::string> expandArguments(const std::vector<std::string>& argumen
     return expanded;
 }
 
+std::string parseUrlHash(const std::string& urlHash)
+{
+    constexpr auto sha256Prefix = std::string_view {"SHA256="};
+    auto prefix = std::string_view {urlHash}.substr(0, sha256Prefix.size());
+
+    if (!eacp::Strings::equalsCaseInsensitive(prefix, sha256Prefix))
+    {
+        throw std::invalid_argument(
+            "URL_HASH " + urlHash
+            + " is not SHA256=<hex>, the only hash lockstep checks");
+    }
+
+    return eacp::Strings::toLower(urlHash.substr(sha256Prefix.size()));
+}
+
 std::pair<std::string, std::string> splitOption(const std::string& option)
 {
     auto space = option.find(' ');
@@ -241,8 +333,18 @@ std::pair<std::string, std::string> splitOption(const std::string& option)
     return {option.substr(0, space), value};
 }
 
-void setSourceFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
+void setSourceFromKeywords(PackageSpec& spec,
+                           const KeywordValues& keywords,
+                           ArgumentDialect dialect)
 {
+    if (auto local = keywords.findValue("SOURCE_DIR");
+        local && dialect == ArgumentDialect::cpm)
+    {
+        spec.kind = "local";
+        spec.localSourceDirectory = *local;
+        return;
+    }
+
     auto github = keywords.findValue("GITHUB_REPOSITORY");
 
     if (!github)
@@ -308,12 +410,13 @@ std::string getPackageNameFromUrl(const std::string& url)
     return name;
 }
 
-PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
+PackageSpec parsePackageArguments(const std::vector<std::string>& arguments,
+                                  ArgumentDialect dialect)
 {
     auto keywords = collectKeywordValues(expandArguments(arguments));
     auto spec = PackageSpec {};
 
-    setSourceFromKeywords(spec, keywords);
+    setSourceFromKeywords(spec, keywords, dialect);
 
     spec.name = keywords.findValue("NAME").value_or("");
 
@@ -343,7 +446,15 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
     spec.isDownloadOnly = keywords.isFlagSet("DOWNLOAD_ONLY");
     spec.isExcludedFromAll = keywords.isFlagSet("EXCLUDE_FROM_ALL");
     spec.isSystem = keywords.isFlagSet("SYSTEM");
-    spec.hasPatchCommand = keywords.hasList("PATCH_COMMAND");
+    spec.submoduleSelection.isRestricted = keywords.hasList("GIT_SUBMODULES");
+    spec.submoduleSelection.paths = keywords.findList("GIT_SUBMODULES");
+
+    if (auto recurse = keywords.findValue("GIT_SUBMODULES_RECURSE"))
+        spec.submoduleSelection.isRecursive = !isFalseWord(*recurse);
+
+    if (auto urlHash = keywords.findValue("URL_HASH"))
+        spec.archiveSha256 = parseUrlHash(*urlHash);
+
     return spec;
 }
 } // namespace lockstep

@@ -3,7 +3,10 @@
 #include <eacp/Core/Utils/Containers.h>
 #include <eacp/Core/Utils/FilePath.h>
 
+#include "Submodules.h"
+
 #include <string>
+#include <vector>
 
 namespace lockstep
 {
@@ -20,6 +23,8 @@ struct PackageRequest
     std::string url;
     std::string ref;
     eacp::Vector<eacp::FilePath> patches;
+    SubmoduleSelection submoduleSelection;
+    std::string archiveSha256;
 };
 
 struct MaterializedPackage
@@ -27,6 +32,7 @@ struct MaterializedPackage
     std::string commit;
     std::string hash;
     eacp::FilePath sourceDirectory;
+    std::vector<LockedSubmodule> submodules;
 };
 
 // The shared cache: bare git mirrors under git/, downloaded archives under
@@ -60,14 +66,29 @@ private:
     std::string fetchGitTree(const PackageRequest& request,
                              const std::string& commit,
                              Network network,
-                             const eacp::FilePath& staging) const;
+                             const eacp::FilePath& staging,
+                             std::vector<LockedSubmodule>& submodules) const;
+    eacp::FilePath fetchCommitIntoMirror(const std::string& name,
+                                         const std::string& url,
+                                         const std::string& commit,
+                                         Network network) const;
+    void checkOutSubmodules(const std::string& name,
+                            const std::string& parentUrl,
+                            const eacp::FilePath& parentMirror,
+                            const std::string& parentCommit,
+                            const eacp::FilePath& tree,
+                            const std::string& pathPrefix,
+                            const SubmoduleSelection& selection,
+                            Network network,
+                            std::vector<LockedSubmodule>& submodules) const;
     void fetchArchiveTree(const PackageRequest& request,
                           Network network,
                           const eacp::FilePath& staging) const;
     void extractArchive(const eacp::FilePath& archive,
                         const eacp::FilePath& destination) const;
     MaterializedPackage storeTree(const eacp::FilePath& tree,
-                                  const std::string& commit) const;
+                                  const std::string& commit,
+                                  std::vector<LockedSubmodule> submodules) const;
 
     eacp::FilePath root;
     eacp::FilePath cmake;

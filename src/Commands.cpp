@@ -13,6 +13,7 @@
 
 #include <ResEmbed/ResEmbed.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 
@@ -92,7 +93,9 @@ LockedPackage resolvePackage(const PackageCache& cache,
             request.url,
             request.ref,
             patchesForLock,
+            request.submoduleSelection,
             materialized.commit,
+            materialized.submodules,
             materialized.hash};
 }
 
@@ -107,6 +110,30 @@ eacp::FilePath ensureLockedPackageIsCached(const PackageCache& cache,
     cache.removeEntry(locked.hash);
     printStatus("fetching " + locked.name + " " + locked.commit + " into the cache");
     auto materialized = cache.materialize(request, locked.commit, network);
+
+    for (const auto& submodule: materialized.submodules)
+    {
+        auto isLocked =
+            std::find(locked.submodules.begin(), locked.submodules.end(), submodule)
+            != locked.submodules.end();
+
+        if (!isLocked)
+        {
+            throw std::runtime_error(
+                locked.name + "'s submodule " + submodule.path + " is at "
+                + submodule.commit + " from " + submodule.url
+                + ", which the lock does not record; re-lock it "
+                  "with -DLOCKSTEP_MODE=update");
+        }
+    }
+
+    if (materialized.submodules.size() != locked.submodules.size())
+    {
+        throw std::runtime_error(locked.name + " checks out "
+                                 + std::to_string(materialized.submodules.size())
+                                 + " submodules, but the lock records "
+                                 + std::to_string(locked.submodules.size()));
+    }
 
     if (materialized.hash != locked.hash)
     {
@@ -168,7 +195,7 @@ void checkRequestMatchesLock(const CommandOptions& options,
         options.requestedBy.str() + " asks for " + spec.name + " from " + spec.url
         + " at '" + spec.ref + "', but " + options.lock.str() + " locks it from "
         + locked.url + " at '" + locked.requestedRef
-        + "' (or with other patches). Configure with -DLOCKSTEP_MODE=update to "
+        + "' (or with other patches or submodules). Configure with -DLOCKSTEP_MODE=update to "
           "re-lock it.");
 }
 
@@ -180,6 +207,8 @@ eacp::FilePath resolveLockedSource(const CommandOptions& options,
     auto cache = createPackageCache(options);
     auto lock = readLockFile(options.lock);
     auto request = PackageRequest {spec.name, spec.kind, spec.url, spec.ref, {}};
+    request.submoduleSelection = spec.submoduleSelection;
+    request.archiveSha256 = spec.archiveSha256;
 
     for (const auto& patch: spec.patches)
         request.patches.add(makeAbsolute(options.requestedBy, patch));
@@ -235,14 +264,6 @@ eacp::FilePath resolvePackageSource(const CommandOptions& options,
 
     if (spec.kind == "local")
         return makeAbsolute(options.requestedBy, spec.localSourceDirectory);
-
-    if (spec.hasPatchCommand)
-    {
-        throw std::runtime_error(
-            options.requestedBy.str() + " declares " + spec.name
-            + " with PATCH_COMMAND, whose result lockstep cannot "
-              "hash; use PATCHES");
-    }
 
     return resolveLockedSource(options, spec);
 }
@@ -412,6 +433,22 @@ SessionOverride parseOverride(const std::string& definition)
 }
 } // namespace
 
+namespace
+{
+PackageSpec parseArgumentsFrom(const CommandOptions& options,
+                               ArgumentDialect dialect)
+{
+    try
+    {
+        return parsePackageArguments(options.packageArguments, dialect);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        throw std::runtime_error(options.requestedBy.str() + ": " + error.what());
+    }
+}
+} // namespace
+
 int runBeginCommand(const CommandOptions& options)
 {
     checkModeIsKnown(options.mode);
@@ -433,14 +470,14 @@ int runBeginCommand(const CommandOptions& options)
 
 int runAddCommand(const CommandOptions& options)
 {
-    auto spec = parsePackageArguments(options.packageArguments);
+    auto spec = parseArgumentsFrom(options, ArgumentDialect::cpm);
     writeSnippet(options, addPackage(options, spec));
     return 0;
 }
 
 int runProvideCommand(const CommandOptions& options)
 {
-    auto spec = parsePackageArguments(options.packageArguments);
+    auto spec = parseArgumentsFrom(options, ArgumentDialect::fetchContent);
 
     if (spec.kind == "local")
     {

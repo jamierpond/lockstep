@@ -19,3 +19,12 @@ add_consumer_project_test(github 1)
 add_consumer_project_test(cpm 4)
 add_consumer_project_test(fetchcontent 1)
 add_consumer_project_test(archive 2)
+add_consumer_project_test(cpm-stub 1)
+
+add_test(NAME Consumer/submodules
+        COMMAND ${CMAKE_COMMAND}
+        -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/submodules
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-submodules
+        -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+        -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/RunSubmoduleProject.cmake)

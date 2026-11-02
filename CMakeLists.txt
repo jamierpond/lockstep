@@ -30,6 +30,7 @@ add_library(lockstep-lib STATIC
         src/PackageCache.cpp
         src/PinnedRelease.cpp
         src/Session.cpp
+        src/Submodules.cpp
         src/Sha256.cpp)
 
 target_include_directories(lockstep-lib PUBLIC src)

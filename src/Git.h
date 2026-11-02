@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace lockstep
 {
@@ -24,6 +25,19 @@ std::string fetchRefIntoMirror(const eacp::FilePath& mirror, const std::string& 
 void checkOutCommit(const eacp::FilePath& mirror,
                     const std::string& commit,
                     const eacp::FilePath& destination);
+
+struct GitSubmodule
+{
+    std::string path;
+    std::string url;
+    std::string commit;
+};
+
+// The submodules `.gitmodules` in `tree` lists, each with the commit the
+// gitlink at its path in `commit` names. Empty when there is no .gitmodules.
+std::vector<GitSubmodule> listSubmodules(const eacp::FilePath& mirror,
+                                         const std::string& commit,
+                                         const eacp::FilePath& tree);
 
 void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch);
 } // namespace lockstep

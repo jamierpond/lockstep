@@ -11,6 +11,7 @@
 #include <eacp/Core/Utils/Zip.h>
 #include <eacp/Core/Platform/Platform.h>
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace lockstep
@@ -139,11 +140,13 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
         auto tree = staging / "tree";
         eacp::Files::createDirectories(tree);
         auto resolvedCommit = std::string {};
+        auto submodules = std::vector<LockedSubmodule> {};
 
         if (request.kind == archiveKind)
             fetchArchiveTree(request, network, tree);
         else
-            resolvedCommit = fetchGitTree(request, commit, network, tree);
+            resolvedCommit =
+                fetchGitTree(request, commit, network, tree, submodules);
 
         auto contentRoot = tree;
 
@@ -153,7 +156,7 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
         for (const auto& patch: request.patches)
             applyPatch(contentRoot, patch);
 
-        auto stored = storeTree(contentRoot, resolvedCommit);
+        auto stored = storeTree(contentRoot, resolvedCommit, std::move(submodules));
         eacp::Files::removeAll(staging);
         return stored;
     }
@@ -164,41 +167,112 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
     }
 }
 
-std::string PackageCache::fetchGitTree(const PackageRequest& request,
-                                       const std::string& commit,
-                                       Network network,
-                                       const eacp::FilePath& staging) const
+eacp::FilePath PackageCache::fetchCommitIntoMirror(const std::string& name,
+                                                   const std::string& url,
+                                                   const std::string& commit,
+                                                   Network network) const
 {
-    auto mirror = getMirrorDirectory(request.url);
+    auto mirror = getMirrorDirectory(url);
     eacp::Files::createDirectories(mirror.parentDirectory());
-    createBareMirror(mirror, request.url);
+    createBareMirror(mirror, url);
 
+    if (hasCommit(mirror, commit))
+        return mirror;
+
+    if (network == Network::forbidden)
+    {
+        throw std::runtime_error(name + " commit " + commit + " from " + url
+                                 + " is not in the cache and offline mode forbids "
+                                   "fetching it");
+    }
+
+    fetchRefIntoMirror(mirror, commit);
+    return mirror;
+}
+
+std::string
+    PackageCache::fetchGitTree(const PackageRequest& request,
+                               const std::string& commit,
+                               Network network,
+                               const eacp::FilePath& staging,
+                               std::vector<LockedSubmodule>& submodules) const
+{
     auto resolvedCommit = commit;
+    auto mirror = getMirrorDirectory(request.url);
 
     if (resolvedCommit.empty())
     {
         if (network == Network::forbidden)
+        {
             throw std::runtime_error(
                 "resolving " + request.name + "'s ref '" + request.ref
                 + "' needs the network, which offline mode forbids");
-
-        resolvedCommit = fetchRefIntoMirror(mirror, request.ref);
-    }
-    else if (!hasCommit(mirror, resolvedCommit))
-    {
-        if (network == Network::forbidden)
-        {
-            throw std::runtime_error(
-                request.name + " commit " + resolvedCommit
-                + " is not in the cache and offline mode forbids "
-                  "fetching it");
         }
 
-        fetchRefIntoMirror(mirror, resolvedCommit);
+        eacp::Files::createDirectories(mirror.parentDirectory());
+        createBareMirror(mirror, request.url);
+        resolvedCommit = fetchRefIntoMirror(mirror, request.ref);
+    }
+    else
+    {
+        mirror = fetchCommitIntoMirror(
+            request.name, request.url, resolvedCommit, network);
     }
 
     checkOutCommit(mirror, resolvedCommit, staging);
+    checkOutSubmodules(request.name,
+                       request.url,
+                       mirror,
+                       resolvedCommit,
+                       staging,
+                       {},
+                       request.submoduleSelection,
+                       network,
+                       submodules);
     return resolvedCommit;
+}
+
+void PackageCache::checkOutSubmodules(const std::string& name,
+                                      const std::string& parentUrl,
+                                      const eacp::FilePath& parentMirror,
+                                      const std::string& parentCommit,
+                                      const eacp::FilePath& tree,
+                                      const std::string& pathPrefix,
+                                      const SubmoduleSelection& selection,
+                                      Network network,
+                                      std::vector<LockedSubmodule>& submodules) const
+{
+    for (const auto& submodule: listSubmodules(parentMirror, parentCommit, tree))
+    {
+        auto fullPath = pathPrefix + submodule.path;
+        auto isSelected =
+            !selection.isRestricted
+            || std::find(selection.paths.begin(), selection.paths.end(), fullPath)
+                   != selection.paths.end();
+
+        if (!isSelected)
+            continue;
+
+        auto url = resolveSubmoduleUrl(parentUrl, submodule.url);
+        auto mirror = fetchCommitIntoMirror(name, url, submodule.commit, network);
+        auto destination = tree / submodule.path;
+        eacp::Files::createDirectories(destination);
+        checkOutCommit(mirror, submodule.commit, destination);
+        submodules.push_back({fullPath, url, submodule.commit});
+
+        if (selection.isRecursive)
+        {
+            checkOutSubmodules(name,
+                               url,
+                               mirror,
+                               submodule.commit,
+                               destination,
+                               fullPath + "/",
+                               {},
+                               network,
+                               submodules);
+        }
+    }
 }
 
 void PackageCache::fetchArchiveTree(const PackageRequest& request,
@@ -217,6 +291,19 @@ void PackageCache::fetchArchiveTree(const PackageRequest& request,
         }
 
         downloadFile(request.url, archive);
+    }
+
+    if (!request.archiveSha256.empty())
+    {
+        auto actual = convertDigestToHex(computeFileSha256(archive));
+
+        if (actual != request.archiveSha256)
+        {
+            eacp::Files::removeFile(archive);
+            throw std::runtime_error(request.url + " hashes to SHA256=" + actual
+                                     + ", not the URL_HASH SHA256="
+                                     + request.archiveSha256);
+        }
     }
 
     extractArchive(archive, staging);
@@ -246,8 +333,10 @@ void PackageCache::extractArchive(const eacp::FilePath& archive,
                                  + ":\n" + result.errorOutput);
 }
 
-MaterializedPackage PackageCache::storeTree(const eacp::FilePath& tree,
-                                            const std::string& commit) const
+MaterializedPackage
+    PackageCache::storeTree(const eacp::FilePath& tree,
+                            const std::string& commit,
+                            std::vector<LockedSubmodule> submodules) const
 {
     auto hash = computeMerkleHash(tree);
     auto destination = getSourceDirectory(hash);
@@ -263,6 +352,6 @@ MaterializedPackage PackageCache::storeTree(const eacp::FilePath& tree,
     }
 
     writeTextFile(getStampPath(destination), computeTreeStamp(destination));
-    return {commit, hash, destination};
+    return {commit, hash, destination, std::move(submodules)};
 }
 } // namespace lockstep

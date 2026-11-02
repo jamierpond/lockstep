@@ -11,7 +11,15 @@ namespace LockFileTests
 lockstep::LockedPackage createPackage(const std::string& name,
                                       const std::string& hash)
 {
-    return {name, "git", "https://example.com/" + name, "main", {}, "abc123", hash};
+    return {name,
+            "git",
+            "https://example.com/" + name,
+            "main",
+            {},
+            {},
+            "abc123",
+            {},
+            hash};
 }
 } // namespace LockFileTests
 

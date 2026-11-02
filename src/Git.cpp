@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <sstream>
 #include <stdexcept>
 
 namespace lockstep
@@ -44,6 +45,34 @@ std::string runGitOrThrow(
         throw std::runtime_error(joinArguments(arguments) + " failed");
 
     return *output;
+}
+
+std::vector<std::string> splitLines(const std::string& text)
+{
+    auto lines = std::vector<std::string> {};
+    auto stream = std::istringstream {text};
+
+    for (auto line = std::string {}; std::getline(stream, line);)
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        if (!line.empty())
+            lines.push_back(line);
+    }
+
+    return lines;
+}
+
+std::vector<std::string> splitWhitespace(const std::string& text)
+{
+    auto fields = std::vector<std::string> {};
+    auto stream = std::istringstream {text};
+
+    for (auto field = std::string {}; stream >> field;)
+        fields.push_back(field);
+
+    return fields;
 }
 
 bool isFullSha(const std::string& ref)
@@ -160,6 +189,69 @@ void checkOutCommit(const eacp::FilePath& mirror,
 
     runGitOrThrow(arguments, {{"GIT_INDEX_FILE", indexFile.str()}});
     eacp::Files::removeFile(indexFile);
+}
+
+std::vector<GitSubmodule> listSubmodules(const eacp::FilePath& mirror,
+                                         const std::string& commit,
+                                         const eacp::FilePath& tree)
+{
+    auto modulesFile = tree / ".gitmodules";
+
+    if (!eacp::Files::isFile(modulesFile))
+        return {};
+
+    auto listing = runGitOrThrow({"config",
+                                  "--file",
+                                  modulesFile.str(),
+                                  "--get-regexp",
+                                  "^submodule\\..*\\.(path|url)$"});
+    auto namedSubmodules = std::vector<std::pair<std::string, GitSubmodule>> {};
+    auto findByName = [&](const std::string& name) -> GitSubmodule&
+    {
+        for (auto& [existingName, submodule]: namedSubmodules)
+        {
+            if (existingName == name)
+                return submodule;
+        }
+
+        return namedSubmodules.emplace_back(name, GitSubmodule {}).second;
+    };
+
+    for (const auto& line: splitLines(listing))
+    {
+        constexpr auto keyPrefix = std::string_view {"submodule."};
+        auto space = line.find(' ');
+        auto key = line.substr(0, space);
+        auto value = line.substr(space + 1);
+        auto name = key.substr(keyPrefix.size(), key.rfind('.') - keyPrefix.size());
+
+        if (key.ends_with(".path"))
+            findByName(name).path = value;
+        else
+            findByName(name).url = value;
+    }
+
+    auto submodules = std::vector<GitSubmodule> {};
+
+    for (auto& [name, submodule]: namedSubmodules)
+        submodules.push_back(submodule);
+
+    for (auto& submodule: submodules)
+    {
+        auto entry = runGitOrThrow(createMirrorArguments(
+            mirror, {"ls-tree", commit, "--", submodule.path}));
+        auto fields = splitWhitespace(entry);
+        constexpr auto gitlinkFieldCount = 4;
+        constexpr auto shaField = 2;
+
+        if (fields.size() < gitlinkFieldCount || fields[1] != "commit")
+            throw std::runtime_error(".gitmodules lists " + submodule.path
+                                     + ", which is not a submodule at " + commit);
+
+        submodule.commit = fields[shaField];
+    }
+
+    return submodules;
 }
 
 void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch)

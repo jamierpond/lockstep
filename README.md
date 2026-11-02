@@ -36,7 +36,14 @@ one hash over every package.
 `GITLAB_REPOSITORY`, `GIT_REPOSITORY`), `GIT_TAG` or `VERSION` (meaning tag
 `v<VERSION>`), `URL` for `.zip` and tar archives, `OPTIONS`, `PATCHES` (applied
 with `git apply` before hashing), `SOURCE_SUBDIR`, `DOWNLOAD_ONLY`,
-`EXCLUDE_FROM_ALL` and `SYSTEM`. It sets `<Name>_SOURCE_DIR`,
+`EXCLUDE_FROM_ALL`, `SYSTEM`, `SOURCE_DIR` (use a local checkout),
+`URL_HASH SHA256=<hex>` (checked against the archive), `GIT_SUBMODULES` and
+`GIT_SUBMODULES_RECURSE`. Submodules are checked out recursively by default,
+each at the commit its parent names, and the lock records each one's path, URL
+and commit; `GIT_SUBMODULES` with paths limits them, and `GIT_SUBMODULES ""`
+turns them off. `GIT_SHALLOW`, `NO_CACHE` and `CUSTOM_CACHE_KEY` are accepted
+and change nothing, since lockstep fetches exact commits into a cache keyed by
+content. It sets `<Name>_SOURCE_DIR`,
 `<Name>_BINARY_DIR` and `<Name>_ADDED`, as CPM does.
 
 | Variable | Effect |
@@ -69,6 +76,14 @@ A project does not need it installed: its `lockstep.cmake` downloads the binary
 it pins. Run inside a project, an installed `lockstep` reads
 the version the project's `lockstep.cmake` pins and runs that exact release instead, so
 the lock is always written by the version the project builds with.
+
+### Switching from CPM
+
+Add `cmake/lockstep.cmake` as above, delete your `CPM.cmake`, and configure
+once with `-DLOCKSTEP_MODE=update`. Your `CPMAddPackage` calls work unchanged.
+Your `include(CPM)` lines can go eventually but do not have to: under lockstep
+they find a stub that does nothing, so a dependency's own lines never need
+editing.
 
 ### Dependencies that use CPM or FetchContent
 
@@ -103,9 +118,10 @@ the same lock verifies on Windows.
   returns at once and fetches nothing, but that one download happens, and
   needs the network even in offline mode the first time. The script overwrites
   `CPM_DOWNLOAD_LOCATION`, so lockstep cannot redirect it.
-- Git submodules are not checked out.
-- FetchContent's `PATCH_COMMAND` is refused, since its result cannot be hashed;
-  use `PATCHES`.
+- `DOWNLOAD_COMMAND`, `UPDATE_COMMAND`, `PATCH_COMMAND` and the other
+  `*_COMMAND` options are refused, since what they produce cannot be locked;
+  use `PATCHES`. So are `FORCE` and `URL_MD5`, and any option lockstep does
+  not know, each by name.
 - Symlinks in a dependency hash differently on Windows when git checks them
   out as plain files.
 

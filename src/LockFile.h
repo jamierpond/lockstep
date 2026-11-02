@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Submodules.h"
+
 #include <eacp/Core/Utils/Containers.h>
 #include <eacp/Core/Utils/FilePath.h>
 
@@ -20,10 +22,20 @@ struct LockedPackage
     std::string url;
     std::string requestedRef;
     std::vector<std::string> patches;
+    SubmoduleSelection submoduleSelection;
     std::string commit;
+    std::vector<LockedSubmodule> submodules;
     std::string hash;
 
-    MIRO_REFLECT(name, kind, url, requestedRef, patches, commit, hash)
+    MIRO_REFLECT(name,
+                 kind,
+                 url,
+                 requestedRef,
+                 patches,
+                 submoduleSelection,
+                 commit,
+                 submodules,
+                 hash)
 };
 
 struct LockFile

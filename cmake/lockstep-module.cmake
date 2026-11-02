@@ -58,9 +58,12 @@ endmacro()
 function(CPMUsePackageLock)
 endfunction()
 
-# A dependency's own include(CPM.cmake) returns before defining anything when
-# CPM_DIRECTORY names another directory, or CPM_INITIALIZED is set.
-set(CPM_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}")
+# include(CPM) finds this empty stub first; a dependency's own CPM.cmake,
+# included by path, returns before defining anything when CPM_DIRECTORY names
+# another directory or CPM_INITIALIZED is set.
+file(WRITE "${CMAKE_BINARY_DIR}/_lockstep/cpm/CPM.cmake" "# lockstep defines CPMAddPackage\n")
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_BINARY_DIR}/_lockstep/cpm")
+set(CPM_DIRECTORY "${CMAKE_BINARY_DIR}/_lockstep/cpm")
 set(CPM_VERSION 999999.0.0)
 set(CPM_FILE "${LOCKSTEP_BOOTSTRAP}")
 set(CPM_DOWNLOAD_LOCATION "${LOCKSTEP_BOOTSTRAP}")

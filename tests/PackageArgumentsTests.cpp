@@ -1,5 +1,7 @@
 #include <PackageArguments.h>
 
+#include <Submodules.h>
+
 #include <NanoTest/NanoTest.h>
 
 #include <stdexcept>
@@ -136,7 +138,8 @@ auto tFetchContentDetails = test("Arguments/fetchContentDeclareDetails") = []
                                "GIT_TAG",
                                "v1.0.1",
                                "SOURCE_DIR",
-                               "/tmp/somewhere"});
+                               "/tmp/somewhere"},
+                              lockstep::ArgumentDialect::fetchContent);
     check(spec.kind == "git");
     check(spec.name == "adder");
 };
@@ -146,19 +149,6 @@ auto tSourceDirOnlyIsLocal = test("Arguments/sourceDirAloneIsLocal") = []
     auto spec = parsePackageArguments({"NAME", "mine", "SOURCE_DIR", "../mine"});
     check(spec.kind == "local");
     check(spec.localSourceDirectory == "../mine");
-};
-
-auto tPatchCommandNoticed = test("Arguments/patchCommandIsNoticed") = []
-{
-    auto spec = parsePackageArguments({"NAME",
-                                       "a",
-                                       "URL",
-                                       "https://x/a.zip",
-                                       "PATCH_COMMAND",
-                                       "git",
-                                       "apply",
-                                       "x.patch"});
-    check(spec.hasPatchCommand);
 };
 
 auto tMissingSourceThrows = test("Arguments/noSourceThrows") = []
@@ -191,4 +181,123 @@ auto tMissingTagThrows = test("Arguments/gitWithoutTagOrVersionThrows") = []
     }
 
     check(threw);
+};
+
+namespace PackageArgumentsTests
+{
+bool isRejected(const std::vector<std::string>& arguments,
+                const std::string& expected)
+{
+    try
+    {
+        parsePackageArguments(arguments);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        return std::string {error.what()}.find(expected) != std::string::npos;
+    }
+
+    return false;
+}
+
+std::vector<std::string> withGitSource(std::vector<std::string> extra)
+{
+    auto arguments = std::vector<std::string> {
+        "NAME", "a", "GITHUB_REPOSITORY", "o/a", "GIT_TAG", "v1"};
+    arguments.insert(arguments.end(), extra.begin(), extra.end());
+    return arguments;
+}
+} // namespace PackageArgumentsTests
+
+using PackageArgumentsTests::isRejected;
+using PackageArgumentsTests::withGitSource;
+
+auto tSubmodulesDefault = test("Arguments/submodulesDefaultToAllRecursive") = []
+{
+    auto spec = parsePackageArguments(withGitSource({}));
+    check(!spec.submoduleSelection.isRestricted);
+    check(spec.submoduleSelection.isRecursive);
+};
+
+auto tSubmodulesNamed = test("Arguments/gitSubmodulesNamesPaths") = []
+{
+    auto spec = parsePackageArguments(withGitSource({"GIT_SUBMODULES",
+                                                     "external/a",
+                                                     "external/b",
+                                                     "GIT_SUBMODULES_RECURSE",
+                                                     "OFF"}));
+    check(spec.submoduleSelection.isRestricted);
+    check(spec.submoduleSelection.paths.size() == 2);
+    check(!spec.submoduleSelection.isRecursive);
+};
+
+auto tSubmodulesEmpty = test("Arguments/emptyGitSubmodulesMeansNone") = []
+{
+    auto spec =
+        parsePackageArguments(withGitSource({"GIT_SUBMODULES", "EXCLUDE_FROM_ALL"}));
+    check(spec.submoduleSelection.isRestricted);
+    check(spec.submoduleSelection.paths.empty());
+    check(spec.isExcludedFromAll);
+};
+
+auto tUrlHash = test("Arguments/urlHashSha256IsKept") = []
+{
+    auto spec = parsePackageArguments(
+        {"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "SHA256=ABCDEF"});
+    check(spec.archiveSha256 == "abcdef");
+};
+
+auto tUrlHashOther = test("Arguments/urlHashOtherAlgorithmsRefused") = []
+{
+    check(
+        isRejected({"NAME", "z", "URL", "https://x/z.tar.gz", "URL_HASH", "MD5=ab"},
+                   "URL_HASH"));
+};
+
+auto tIgnored = test("Arguments/shallowNoCacheAndCacheKeyAreAccepted") = []
+{
+    auto spec = parsePackageArguments(withGitSource({"GIT_SHALLOW",
+                                                     "TRUE",
+                                                     "NO_CACHE",
+                                                     "YES",
+                                                     "CUSTOM_CACHE_KEY",
+                                                     "k",
+                                                     "SYSTEM"}));
+    check(spec.isSystem);
+};
+
+auto tRefused = test("Arguments/commandsAndForceAreRefusedByName") = []
+{
+    check(isRejected(withGitSource({"DOWNLOAD_COMMAND", "curl", "x"}),
+                     "DOWNLOAD_COMMAND"));
+    check(isRejected(withGitSource({"UPDATE_COMMAND", "git", "pull"}),
+                     "UPDATE_COMMAND"));
+    check(isRejected(withGitSource({"PATCH_COMMAND", "git", "apply"}),
+                     "PATCH_COMMAND"));
+    check(isRejected(withGitSource({"FORCE", "YES"}), "FORCE"));
+    check(isRejected(withGitSource({"URL_MD5", "ab"}), "URL_MD5"));
+};
+
+auto tUnknown = test("Arguments/unknownOptionIsNamed") = []
+{ check(isRejected(withGitSource({"GIT_FROBNICATE", "x"}), "GIT_FROBNICATE")); };
+
+auto tCpmSourceDir = test("Arguments/cpmSourceDirIsLocalEvenWithRepository") = []
+{
+    auto spec = parsePackageArguments(withGitSource({"SOURCE_DIR", "../a"}));
+    check(spec.kind == "local");
+};
+
+auto tRelativeUrls = test("Submodules/relativeUrlsResolveAgainstParent") = []
+{
+    using lockstep::resolveSubmoduleUrl;
+    check(resolveSubmoduleUrl("https://github.com/a/b.git", "../c.git")
+          == "https://github.com/a/c.git");
+    check(resolveSubmoduleUrl("https://github.com/a/b", "../../x/c")
+          == "https://github.com/x/c");
+    check(resolveSubmoduleUrl("https://github.com/a/b.git", "./sub")
+          == "https://github.com/a/b.git/sub");
+    check(resolveSubmoduleUrl("https://github.com/a/b.git", "https://other/x.git")
+          == "https://other/x.git");
+    check(resolveSubmoduleUrl("file:///tmp/fixtures/top", "../leaf")
+          == "file:///tmp/fixtures/leaf");
 };
