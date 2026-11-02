@@ -28,6 +28,7 @@ function(configure expect_success)
             "-DLOCKSTEP_SHIM=${LOCKSTEP_SHIM}" "-DLOCKSTEP_EXECUTABLE=${LOCKSTEP_EXECUTABLE}"
             "-DLOCKSTEP_CACHE=${WORK_DIR}/cache" "-DLOCKSTEP_LOCK_FILE=${WORK_DIR}/lockstep.lock"
             "-DFIXTURE_URL=${fixture_url}" ${ARGN}
+            WORKING_DIRECTORY "${configure_working_directory}"
             RESULT_VARIABLE exit_code OUTPUT_VARIABLE output ERROR_VARIABLE output)
     message("${output}")
     if (expect_success AND NOT exit_code EQUAL 0)
@@ -39,6 +40,7 @@ function(configure expect_success)
 endfunction()
 
 file(REMOVE_RECURSE "${WORK_DIR}")
+set(configure_working_directory "${WORK_DIR}")
 create_repository(leaf)
 create_repository(middle leaf)
 create_repository(top middle)
@@ -59,6 +61,16 @@ endif ()
 
 file(REMOVE_RECURSE "${WORK_DIR}/cache/src")
 configure(TRUE locked)
+
+# A configure run from inside a worktree whose .git names a directory that does
+# not exist, as in a container with only the worktree mounted.
+set(broken_worktree "${WORK_DIR}/broken-worktree")
+file(MAKE_DIRECTORY "${broken_worktree}")
+file(WRITE "${broken_worktree}/.git" "gitdir: ${WORK_DIR}/missing/.git/worktrees/x\n")
+file(REMOVE_RECURSE "${WORK_DIR}/cache/src")
+set(configure_working_directory "${broken_worktree}")
+configure(TRUE broken-worktree)
+set(configure_working_directory "${WORK_DIR}")
 
 string(JSON locked_commit GET "${lock}" packages 0 submodules 1 commit)
 string(REPLACE "${locked_commit}" "0000000000000000000000000000000000000000" tampered "${lock}")

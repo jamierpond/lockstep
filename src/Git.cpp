@@ -137,6 +137,9 @@ std::optional<std::string>
     options.arguments = getPlatformArguments(arguments);
     options.environment = environment;
     options.environment.add({"GIT_TERMINAL_PROMPT", "0"});
+    // Never the project's own directory: git would read its .git first, and a
+    // worktree whose .git points somewhere missing stops every command.
+    options.workingDirectory = eacp::FilePath::tempDirectory().str();
 
     auto result = eacp::Processes::run(options);
 
