@@ -12,7 +12,7 @@ lockstep::LockedPackage createPackage(const std::string& name,
                                       const std::string& hash)
 {
     return {name,
-            "git",
+            lockstep::PackageKind::git,
             "https://example.com/" + name,
             "main",
             {},

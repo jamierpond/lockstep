@@ -3,8 +3,10 @@
 #include "Git.h"
 #include "LongPath.h"
 #include "MerkleHash.h"
+#include "Paths.h"
 #include "Messages.h"
 #include "Sha256.h"
+#include "Status.h"
 
 #include <eacp/Core/Process/Process.h>
 #include <eacp/Core/Utils/Console.h>
@@ -14,7 +16,8 @@
 #include <eacp/Core/Utils/Zip.h>
 #include <eacp/Core/Platform/Platform.h>
 
-#include <algorithm>
+#include <ea_data_structures/Utilities/VectorUtilities.h>
+
 #include <stdexcept>
 
 namespace lockstep
@@ -22,7 +25,6 @@ namespace lockstep
 namespace
 {
 constexpr auto urlKeyLength = 16;
-constexpr auto archiveKind = std::string_view {"archive"};
 
 std::string computeUrlKey(const std::string& url)
 {
@@ -31,12 +33,7 @@ std::string computeUrlKey(const std::string& url)
 
 eacp::FilePath getStampPath(const eacp::FilePath& sourceDirectory)
 {
-    return sourceDirectory.sibling(sourceDirectory.fileName() + ".stamp");
-}
-
-void writeTextFile(const eacp::FilePath& path, const std::string& text)
-{
-    eacp::Files::writeFile(path, std::string_view {text});
+    return getSiblingWithSuffix(sourceDirectory, ".stamp");
 }
 
 std::string readStamp(const eacp::FilePath& path)
@@ -119,11 +116,16 @@ eacp::FilePath PackageCache::getDefaultDirectory()
     if constexpr (eacp::Platform::isWindows())
         return eacp::FilePath::cacheDirectory() / "lockstep";
 
-    if (auto xdgCache = eacp::getEnv("XDG_CACHE_HOME");
-        xdgCache && !xdgCache->empty())
-        return eacp::FilePath {*xdgCache} / "lockstep";
+    if (auto xdgCache = eacp::getEnvValue("XDG_CACHE_HOME"); !xdgCache.empty())
+        return eacp::FilePath {xdgCache} / "lockstep";
 
-    return eacp::FilePath::homeDirectory() / ".cache" / "lockstep";
+    // $HOME before the account's home, as the bootstrap reads it.
+    auto home = eacp::FilePath {eacp::getEnvValue("HOME")};
+
+    if (home.empty())
+        home = eacp::FilePath::homeDirectory();
+
+    return home / ".cache" / "lockstep";
 }
 
 eacp::FilePath PackageCache::getSourceDirectory(const std::string& hash) const
@@ -134,6 +136,14 @@ eacp::FilePath PackageCache::getSourceDirectory(const std::string& hash) const
 eacp::FilePath PackageCache::getMirrorDirectory(const std::string& url) const
 {
     return root / "git" / (computeUrlKey(url) + ".git");
+}
+
+eacp::FilePath PackageCache::getOrCreateMirror(const std::string& url) const
+{
+    auto mirror = getMirrorDirectory(url);
+    eacp::Files::createDirectories(mirror.parentDirectory());
+    createBareMirror(mirror, url);
+    return mirror;
 }
 
 eacp::FilePath PackageCache::getDownloadPath(const std::string& url) const
@@ -153,7 +163,7 @@ eacp::FilePath PackageCache::createStagingDirectory() const
 }
 
 bool PackageCache::hasIntactEntry(const std::string& hash,
-                                  bool alwaysRecompute) const
+                                  Verification verification) const
 {
     auto directory = getSourceDirectory(hash);
 
@@ -163,13 +173,13 @@ bool PackageCache::hasIntactEntry(const std::string& hash,
     auto stampPath = getStampPath(directory);
     auto stamp = computeTreeStamp(directory);
 
-    if (!alwaysRecompute && readStamp(stampPath) == stamp)
+    if (verification == Verification::trustStamp && readStamp(stampPath) == stamp)
         return true;
 
     if (computeMerkleHash(directory) != hash)
         return false;
 
-    writeTextFile(stampPath, stamp);
+    eacp::Files::writeFile(stampPath, std::string_view {stamp});
     return true;
 }
 
@@ -194,7 +204,7 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
         auto submodules = std::vector<LockedSubmodule> {};
         auto usesLfs = false;
 
-        if (request.kind == archiveKind)
+        if (request.kind == PackageKind::archive)
             fetchArchiveTree(request, network, tree);
         else
             resolvedCommit =
@@ -202,7 +212,7 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
 
         auto contentRoot = tree;
 
-        if (request.kind == archiveKind)
+        if (request.kind == PackageKind::archive)
             contentRoot = findArchiveContentRoot(tree);
 
         for (const auto& patch: request.patches)
@@ -225,9 +235,7 @@ eacp::FilePath PackageCache::fetchCommitIntoMirror(const std::string& name,
                                                    const std::string& commit,
                                                    Network network) const
 {
-    auto mirror = getMirrorDirectory(url);
-    eacp::Files::createDirectories(mirror.parentDirectory());
-    createBareMirror(mirror, url);
+    auto mirror = getOrCreateMirror(url);
 
     if (hasCommit(mirror, commit))
         return mirror;
@@ -259,7 +267,7 @@ std::string PackageCache::fetchGitTree(const PackageRequest& request,
                                        bool& usesLfs) const
 {
     auto resolvedCommit = commit;
-    auto mirror = getMirrorDirectory(request.url);
+    auto mirror = eacp::FilePath {};
 
     if (resolvedCommit.empty())
     {
@@ -270,8 +278,7 @@ std::string PackageCache::fetchGitTree(const PackageRequest& request,
                 + "' needs the network, which offline mode forbids");
         }
 
-        eacp::Files::createDirectories(mirror.parentDirectory());
-        createBareMirror(mirror, request.url);
+        mirror = getOrCreateMirror(request.url);
         resolvedCommit = fetchRefIntoMirror(mirror, request.ref);
     }
     else
@@ -307,10 +314,8 @@ void PackageCache::checkOutSubmodules(const std::string& name,
     for (const auto& submodule: listSubmodules(parentListing, tree))
     {
         auto fullPath = pathPrefix + submodule.path;
-        auto isSelected =
-            !selection.isRestricted
-            || std::find(selection.paths.begin(), selection.paths.end(), fullPath)
-                   != selection.paths.end();
+        auto isSelected = !selection.isRestricted
+                          || EA::Vectors::contains(selection.paths, fullPath);
 
         if (!isSelected)
             continue;
@@ -353,30 +358,25 @@ void PackageCache::fetchArchiveTree(const PackageRequest& request,
                                        "forbids downloading it");
         }
 
+        auto expected = ExpectedHash {
+            request.archiveHash.algorithm,
+            request.archiveHash.hex,
+            [this, &request](const eacp::FilePath& file)
+            { return computeArchiveHash(file, request.archiveHash.algorithm); }};
+
         try
         {
-            downloadFile(request.url, archive);
+            downloadFile(request.url, archive, expected);
+        }
+        catch (const HashMismatchError&)
+        {
+            throw;
         }
         catch (const std::runtime_error& error)
         {
-            eacp::Console::printError(
-                eacp::Strings::concat("lockstep: ", error.what()));
+            printStatus(error.what());
             throw std::runtime_error(
                 describeFailedDownload({request.name, request.url, {}}));
-        }
-    }
-
-    if (!request.archiveHash.hex.empty())
-    {
-        auto expected = request.archiveHash;
-        auto actual = computeArchiveHash(archive, expected.algorithm);
-
-        if (actual != expected.hex)
-        {
-            eacp::Files::removeFile(archive);
-            throw std::runtime_error(request.url + " hashes to " + expected.algorithm
-                                     + "=" + actual + ", not the URL_HASH "
-                                     + expected.algorithm + "=" + expected.hex);
         }
     }
 
@@ -388,8 +388,10 @@ std::string PackageCache::computeArchiveHash(const eacp::FilePath& archive,
                                              const std::string& algorithm) const
 {
     auto script = root / "hash-file.cmake";
-    writeTextFile(script,
-                  "file(${ALGORITHM} \"${FILE}\" digest)\nmessage(\"${digest}\")\n");
+    eacp::Files::writeFile(
+        script,
+        std::string_view {
+            "file(${ALGORITHM} \"${FILE}\" digest)\nmessage(\"${digest}\")\n"});
 
     auto options = eacp::Processes::ProcessOptions {};
     options.executable = cmake.str();
@@ -446,7 +448,8 @@ MaterializedPackage
                                      + destination.str());
     }
 
-    writeTextFile(getStampPath(destination), computeTreeStamp(destination));
+    eacp::Files::writeFile(getStampPath(destination),
+                           std::string_view {computeTreeStamp(destination)});
     return {commit, hash, destination, std::move(submodules)};
 }
 } // namespace lockstep

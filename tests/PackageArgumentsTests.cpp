@@ -14,7 +14,7 @@ auto tGithubKeyword = test("Arguments/githubKeywordWithTag") = []
     auto spec = parsePackageArguments(
         {"NAME", "Miro", "GITHUB", "eyalamirmusic/Miro", "GIT_TAG", "main"});
     check(spec.name == "Miro");
-    check(spec.kind == "git");
+    check(spec.kind == lockstep::PackageKind::git);
     check(spec.url == "https://github.com/eyalamirmusic/Miro.git");
     check(spec.ref == "main");
 };
@@ -59,7 +59,7 @@ auto tShorthandBitbucket = test("Arguments/shorthandBitbucketHashTag") = []
 auto tShorthandGitUrl = test("Arguments/shorthandGitUrlAtVersion") = []
 {
     auto spec = parsePackageArguments({"https://example.com/lib/thing.git@2.0"});
-    check(spec.kind == "git");
+    check(spec.kind == lockstep::PackageKind::git);
     check(spec.url == "https://example.com/lib/thing.git");
     check(spec.name == "thing");
     check(spec.ref == "v2.0");
@@ -76,7 +76,7 @@ auto tShorthandSshUrl = test("Arguments/shorthandSshUrlKeepsItsAt") = []
 auto tShorthandArchive = test("Arguments/shorthandArchiveIsUrl") = []
 {
     auto spec = parsePackageArguments({"https://example.com/zlib-1.3.1.tar.gz"});
-    check(spec.kind == "archive");
+    check(spec.kind == lockstep::PackageKind::archive);
     check(spec.name == "zlib-1.3.1");
 };
 
@@ -139,7 +139,7 @@ auto tFetchContentDetails = test("Arguments/fetchContentDeclareDetails") = []
                                "v1.0.1",
                                "SOURCE_DIR",
                                "/tmp/somewhere"});
-    check(spec.kind == "git");
+    check(spec.kind == lockstep::PackageKind::git);
     check(spec.name == "adder");
     check(spec.checkoutDirectory == "/tmp/somewhere");
 };
@@ -147,7 +147,7 @@ auto tFetchContentDetails = test("Arguments/fetchContentDeclareDetails") = []
 auto tSourceDirOnlyIsLocal = test("Arguments/sourceDirAloneIsLocal") = []
 {
     auto spec = parsePackageArguments({"NAME", "mine", "SOURCE_DIR", "../mine"});
-    check(spec.kind == "local");
+    check(spec.kind == lockstep::PackageKind::local);
     check(spec.localSourceDirectory == "../mine");
 };
 
@@ -308,7 +308,7 @@ auto tUnknown = test("Arguments/unknownOptionIsNamed") = []
 auto tCpmSourceDir = test("Arguments/sourceDirWithRepositoryIsWhereItIsCloned") = []
 {
     auto spec = parsePackageArguments(withGitSource({"SOURCE_DIR", "../a"}));
-    check(spec.kind == "git");
+    check(spec.kind == lockstep::PackageKind::git);
     check(spec.checkoutDirectory == "../a");
     check(spec.localSourceDirectory.empty());
 };
