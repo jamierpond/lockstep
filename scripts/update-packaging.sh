@@ -50,9 +50,11 @@ publish() {
         return
     fi
 
-    git -C "$checkout" -c user.name="${GIT_AUTHOR_NAME:-github-actions}" \
-        -c user.email="${GIT_AUTHOR_EMAIL:-github-actions@users.noreply.github.com}" \
-        commit --quiet -m "lockstep $version"
+    if [ -z "$(git -C "$checkout" config user.name || true)" ]; then
+        git -C "$checkout" config user.name github-actions
+        git -C "$checkout" config user.email github-actions@users.noreply.github.com
+    fi
+    git -C "$checkout" commit --quiet -m "lockstep $version"
     git -C "$checkout" push --quiet origin HEAD
     echo "update-packaging: pushed lockstep $version to $repository"
 }

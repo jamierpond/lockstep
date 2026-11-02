@@ -58,9 +58,15 @@ lockstep verify --full     # rehash every tree instead of trusting size/mtime st
 lockstep root              # print the root hash
 ```
 
-Install it with `brew install jamierpond/tap/lockstep`, or on Windows
-`scoop bucket add jamierpond https://github.com/jamierpond/scoop-bucket` then
-`scoop install lockstep`. Run inside a project, an installed `lockstep` reads
+## Install
+
+```bash
+brew install jamierpond/tap/lockstep
+scoop bucket add jamierpond https://github.com/jamierpond/scoop-bucket && scoop install lockstep
+```
+
+A project does not need it installed: its `lockstep.cmake` downloads the binary
+it pins. Run inside a project, an installed `lockstep` reads
 the version the project's `lockstep.cmake` pins and runs that exact release instead, so
 the lock is always written by the version the project builds with.
 
@@ -117,9 +123,16 @@ archives or the pinned binary. CI checks these floors on every build.
 
 ## Building and releasing
 
+lockstep builds itself with lockstep: its `CMakeLists.txt` loads
+`cmake/lockstep.cmake`, which pins the previous release, and `lockstep.lock`
+locks eacp and its dependencies. Bumping that pin is a manual commit after
+each release. `-DLOCKSTEP_EXECUTABLE=<path>` runs a local build instead.
+
 ```bash
-cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build && ctest --test-dir build
+just test                 # configure, build and run every test
+just install              # cmake --install into ~/.local (just install <prefix>)
+just fmt                  # clang-format over src and tests
+just clean
 ```
 
 The tests include configuring sample projects against real GitHub packages,

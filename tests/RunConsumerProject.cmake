@@ -62,7 +62,8 @@ find_program(sample NAMES sample PATHS "${WORK_DIR}/build-locked"
         "${WORK_DIR}/build-locked/Release" NO_DEFAULT_PATH REQUIRED)
 run_step("${sample}")
 
-run_step("${LOCKSTEP_EXECUTABLE}" verify --full --lock "${source}/lockstep.lock"
+run_step("${CMAKE_COMMAND}" -E env "LOCKSTEP_EXECUTABLE=${LOCKSTEP_EXECUTABLE}"
+        "${LOCKSTEP_EXECUTABLE}" verify --full --lock "${source}/lockstep.lock"
         --cache "${WORK_DIR}/cache")
 
 run_step("${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-offline"

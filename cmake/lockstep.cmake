@@ -5,12 +5,12 @@ cmake_minimum_required(VERSION 3.25)
 
 set(LOCKSTEP_VERSION 0.2.0)
 set(LOCKSTEP_RELEASE_URL https://github.com/jamierpond/lockstep/releases/download)
-set(LOCKSTEP_SHA256_macos-arm64 "")
-set(LOCKSTEP_SHA256_macos-x64 "")
-set(LOCKSTEP_SHA256_windows-x64 "")
-set(LOCKSTEP_SHA256_windows-arm64 "")
-set(LOCKSTEP_SHA256_linux-x64 "")
-set(LOCKSTEP_SHA256_linux-arm64 "")
+set(LOCKSTEP_SHA256_macos-arm64 "f4f495a5fb1adc6aab9be264153bc99039f88c5755a88d279cc2d3c95d936f79")
+set(LOCKSTEP_SHA256_macos-x64 "f4f495a5fb1adc6aab9be264153bc99039f88c5755a88d279cc2d3c95d936f79")
+set(LOCKSTEP_SHA256_windows-x64 "397b1bd787e33f34055ca5027d4f22229d02cff4f8f9b354873c053ee1f35077")
+set(LOCKSTEP_SHA256_windows-arm64 "f4fed0bfe7e45e2b6ee8bafda8c52070ed51edf75fb5cbb4c751c3631fafcfe3")
+set(LOCKSTEP_SHA256_linux-x64 "3c515178a6559aaa1bebc5b0c5878faf3a0635fb6dbdb10d9a15219b4a767feb")
+set(LOCKSTEP_SHA256_linux-arm64 "0c99d632c7869b3e6ebc1ff73f0d12aad608ba7bd3195f7760701f41a25cb10b")
 
 set(LOCKSTEP_BOOTSTRAP "${CMAKE_CURRENT_LIST_FILE}")
 set(LOCKSTEP_CACHE "$ENV{LOCKSTEP_CACHE}" CACHE PATH "The shared lockstep cache")
@@ -40,6 +40,7 @@ if (NOT LOCKSTEP_EXECUTABLE)
     endif ()
 endif ()
 
-execute_process(COMMAND "${LOCKSTEP_EXECUTABLE}" cmake-module
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "LOCKSTEP_EXECUTABLE=${LOCKSTEP_EXECUTABLE}"
+        "${LOCKSTEP_EXECUTABLE}" cmake-module
         "--output=${CMAKE_BINARY_DIR}/_lockstep/lockstep-module.cmake" COMMAND_ERROR_IS_FATAL ANY)
 include("${CMAKE_BINARY_DIR}/_lockstep/lockstep-module.cmake")

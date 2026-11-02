@@ -1,7 +1,4 @@
-CPMAddPackage(
-        NAME NanoTest
-        GITHUB_REPOSITORY eyalamirmusic/NanoTest
-        GIT_TAG main)
+lockstep_add_package(NAME NanoTest GITHUB eyalamirmusic/NanoTest GIT_TAG main)
 
 nano_add_executable(LockstepTests
         SOURCES Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp
