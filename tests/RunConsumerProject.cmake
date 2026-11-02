@@ -72,3 +72,26 @@ string(JSON overridden_name GET "${lock}" packages 0 name)
 expect_failure("LOCKSTEP_CI forbids"
         "${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-ci"
         -DLOCKSTEP_CI=ON "-DLOCKSTEP_${overridden_name}_SOURCE=${WORK_DIR}/source")
+
+# The lock must not depend on where the project is checked out: write it again
+# from a second checkout at another path, with the bootstrap inside each copy,
+# and compare the bytes.
+foreach (checkout first second-checkout)
+    set(copy "${WORK_DIR}/${checkout}/project")
+    file(REMOVE_RECURSE "${WORK_DIR}/${checkout}")
+    file(COPY "${PROJECT_DIR}/" DESTINATION "${copy}")
+    file(COPY "${PROJECT_DIR}/../github/main.cpp" DESTINATION "${WORK_DIR}/${checkout}/github")
+    file(COPY "${LOCKSTEP_SHIM}" DESTINATION "${copy}/cmake")
+    run_step("${CMAKE_COMMAND}" -S "${copy}" -B "${copy}/build" -DLOCKSTEP_MODE=update
+            "-DLOCKSTEP_SHIM=${copy}/cmake/lockstep.cmake"
+            "-DLOCKSTEP_EXECUTABLE=${LOCKSTEP_EXECUTABLE}"
+            "-DLOCKSTEP_CACHE=${WORK_DIR}/cache")
+    file(READ "${copy}/lockstep.lock" lock_${checkout})
+endforeach ()
+
+if (NOT lock_first STREQUAL lock_second-checkout)
+    message(FATAL_ERROR "the lock differs between checkouts:\n${lock_first}\n---\n${lock_second-checkout}")
+endif ()
+if (lock_first MATCHES "${WORK_DIR}")
+    message(FATAL_ERROR "the lock holds a path from this machine:\n${lock_first}")
+endif ()

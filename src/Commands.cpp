@@ -37,7 +37,7 @@ std::string getPathForLock(const eacp::FilePath& lockPath, const std::string& pa
     auto relative =
         eacp::toStdPath(eacp::FilePath {path}).lexically_relative(lockDirectory);
 
-    if (relative.empty() || *relative.begin() == "..")
+    if (relative.empty())
         return path;
 
     return eacp::FilePath {relative}.str();
