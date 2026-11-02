@@ -8,12 +8,19 @@
 
 namespace lockstep
 {
+enum class Mode
+{
+    locked,
+    update,
+    offline
+};
+
 struct CommandOptions
 {
     std::string command;
     eacp::Vector<std::string> names;
     std::vector<std::string> packageArguments;
-    std::string mode;
+    Mode mode = Mode::locked;
     bool isCI = false;
     eacp::FilePath lock;
     eacp::FilePath cache;
@@ -27,8 +34,8 @@ struct CommandOptions
     eacp::FilePath output;
     std::string topLevelIncludes;
     eacp::Vector<std::string> overrides;
-    bool full = false;
-    bool announce = false;
+    bool isFullVerify = false;
+    bool shouldAnnounce = false;
 };
 
 int runBeginCommand(const CommandOptions& options);

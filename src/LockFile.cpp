@@ -2,10 +2,10 @@
 #include "Sha256.h"
 
 #include <eacp/Core/Utils/Files.h>
+#include <ea_data_structures/Utilities/VectorUtilities.h>
 
 #include <Miro/Json.h>
 
-#include <algorithm>
 #include <stdexcept>
 
 namespace lockstep
@@ -14,44 +14,37 @@ namespace
 {
 constexpr auto lockFileIndent = 2;
 
-bool isNamed(const LockedPackage& package, const std::string& name)
+bool isOrderedByName(const LockedPackage& left, const LockedPackage& right)
 {
-    return package.name == name;
+    return left.name < right.name;
+}
+
+auto isNamed(const std::string& name)
+{
+    return [&name](const LockedPackage& package) { return package.name == name; };
 }
 } // namespace
 
 std::optional<LockedPackage> LockFile::findPackage(const std::string& name) const
 {
-    for (const auto& package: packages)
-    {
-        if (isNamed(package, name))
-            return package;
-    }
+    if (auto found = EA::Vectors::findIf(packages, isNamed(name)))
+        return *found;
 
     return std::nullopt;
 }
 
 void LockFile::storePackage(const LockedPackage& package)
 {
-    for (auto& existing: packages)
-    {
-        if (isNamed(existing, package.name))
-        {
-            existing = package;
-            return;
-        }
-    }
-
-    packages.push_back(package);
+    if (auto existing = EA::Vectors::findIf(packages, isNamed(package.name)))
+        *existing = package;
+    else
+        packages.push_back(package);
 }
 
 std::string LockFile::computeRootHash() const
 {
     auto sorted = packages;
-    std::sort(sorted.begin(),
-              sorted.end(),
-              [](const auto& left, const auto& right)
-              { return left.name < right.name; });
+    EA::Vectors::sort(sorted, isOrderedByName);
 
     auto hasher = Sha256 {};
 
@@ -80,10 +73,7 @@ LockFile readLockFile(const eacp::FilePath& path)
 
 std::string formatLockFile(LockFile lock)
 {
-    std::sort(lock.packages.begin(),
-              lock.packages.end(),
-              [](const auto& left, const auto& right)
-              { return left.name < right.name; });
+    EA::Vectors::sort(lock.packages, isOrderedByName);
     lock.root = lock.computeRootHash();
     return Miro::toJSONString(lock, lockFileIndent) + '\n';
 }
@@ -100,8 +90,8 @@ bool isLockFileCurrent(const eacp::FilePath& path)
 void writeLockFile(const eacp::FilePath& path, LockFile lock)
 {
     auto text = formatLockFile(std::move(lock));
-    auto bytes = eacp::Span<const std::uint8_t> {
-        reinterpret_cast<const std::uint8_t*>(text.data()), int(text.size())};
+    auto textBytes = reinterpret_cast<const std::uint8_t*>(text.data());
+    auto bytes = eacp::Span<const std::uint8_t> {textBytes, int(text.size())};
     eacp::Files::writeFileAtomically(path, bytes);
 }
 } // namespace lockstep

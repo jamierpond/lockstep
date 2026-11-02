@@ -397,32 +397,32 @@ void setSourceFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
 
     if (github)
     {
-        spec.kind = "git";
+        spec.kind = PackageKind::git;
         spec.url = "https://github.com/" + *github + ".git";
     }
     else if (auto gitlab = keywords.findValue("GITLAB_REPOSITORY"))
     {
-        spec.kind = "git";
+        spec.kind = PackageKind::git;
         spec.url = "https://gitlab.com/" + *gitlab + ".git";
     }
     else if (auto bitbucket = keywords.findValue("BITBUCKET_REPOSITORY"))
     {
-        spec.kind = "git";
+        spec.kind = PackageKind::git;
         spec.url = "https://bitbucket.org/" + *bitbucket + ".git";
     }
     else if (auto repository = keywords.findValue("GIT_REPOSITORY"))
     {
-        spec.kind = "git";
+        spec.kind = PackageKind::git;
         spec.url = *repository;
     }
     else if (auto urls = keywords.findList("URL"); !urls.empty())
     {
-        spec.kind = "archive";
+        spec.kind = PackageKind::archive;
         spec.url = urls.front();
     }
     else if (auto local = keywords.findValue("SOURCE_DIR"))
     {
-        spec.kind = "local";
+        spec.kind = PackageKind::local;
         spec.localSourceDirectory = *local;
         return;
     }
@@ -495,7 +495,7 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
 
     spec.name = keywords.findValue("NAME").value_or("");
 
-    if (spec.name.empty() && spec.kind != "local")
+    if (spec.name.empty() && spec.kind != PackageKind::local)
         spec.name = getPackageNameFromUrl(spec.url);
 
     if (spec.name.empty())
@@ -503,7 +503,7 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
 
     spec.ref = keywords.findValue("GIT_TAG").value_or("");
 
-    if (spec.kind == "git" && spec.ref.empty())
+    if (spec.kind == PackageKind::git && spec.ref.empty())
     {
         auto version = keywords.findValue("VERSION");
 

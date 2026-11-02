@@ -1,5 +1,6 @@
 #include "PinnedRelease.h"
 #include "Download.h"
+#include "LockFile.h"
 #include "Sha256.h"
 
 #include <eacp/Core/Platform/Platform.h>
@@ -14,8 +15,6 @@ namespace lockstep
 {
 namespace
 {
-constexpr auto lockFileName = "lockstep.lock";
-
 std::string getHostSystemName()
 {
     if constexpr (eacp::Platform::isMac())
@@ -66,11 +65,6 @@ void makeExecutable(const eacp::FilePath& file)
                                  perms::owner_exec | perms::group_exec
                                      | perms::others_exec,
                                  std::filesystem::perm_options::add);
-}
-
-std::string computeFileSha256Hex(const eacp::FilePath& file)
-{
-    return convertDigestToHex(computeFileSha256(file));
 }
 } // namespace
 
@@ -130,20 +124,8 @@ eacp::FilePath fetchPinnedExecutable(const PinnedRelease& release,
     if (!eacp::Files::isFile(executable))
     {
         auto url = release.releaseUrl + "/v" + release.version + "/" + asset;
-        auto downloaded = executable.sibling(asset + ".unverified");
-        downloadFile(url, downloaded);
-
-        auto downloadedHash = computeFileSha256Hex(downloaded);
-
-        if (downloadedHash != release.sha256)
-        {
-            eacp::Files::removeFile(downloaded);
-            throw std::runtime_error(url + " hashes to " + downloadedHash
-                                     + ", not the pinned " + release.sha256);
-        }
-
-        makeExecutable(downloaded);
-        eacp::Files::moveFile(downloaded, executable);
+        downloadFile(url, executable, {.hex = release.sha256});
+        makeExecutable(executable);
     }
 
     auto actualHash = computeFileSha256Hex(executable);

@@ -2,28 +2,30 @@
 
 #include <eacp/Core/Utils/Files.h>
 
+#include <ea_data_structures/Utilities/VectorUtilities.h>
+
 #include <Miro/Json.h>
 
 namespace lockstep
 {
 std::optional<SessionPackage> Session::findPackage(const std::string& name) const
 {
-    for (const auto& package: packages)
-    {
-        if (package.name == name)
-            return package;
-    }
+    auto isNamed = [&name](const SessionPackage& package)
+    { return package.name == name; };
+
+    if (auto found = EA::Vectors::findIf(packages, isNamed))
+        return *found;
 
     return std::nullopt;
 }
 
 std::optional<SessionOverride> Session::findOverride(const std::string& name) const
 {
-    for (const auto& entry: overrides)
-    {
-        if (entry.name == name)
-            return entry;
-    }
+    auto isNamed = [&name](const SessionOverride& entry)
+    { return entry.name == name; };
+
+    if (auto found = EA::Vectors::findIf(overrides, isNamed))
+        return *found;
 
     return std::nullopt;
 }
