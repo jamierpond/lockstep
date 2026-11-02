@@ -55,6 +55,10 @@ struct LockFile
 // An empty lock when the file does not exist yet.
 LockFile readLockFile(const eacp::FilePath& path);
 
+// Whether the file holds exactly what this lockstep would write for it, so a
+// lock from an older version, missing fields this one records, is noticed.
+bool isLockFileCurrent(const eacp::FilePath& path);
+
 // Sorts the packages by name and recomputes the root hash before writing, so
 // the file only changes when a package does.
 void writeLockFile(const eacp::FilePath& path, LockFile lock);

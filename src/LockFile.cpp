@@ -78,15 +78,28 @@ LockFile readLockFile(const eacp::FilePath& path)
     return lock;
 }
 
-void writeLockFile(const eacp::FilePath& path, LockFile lock)
+std::string formatLockFile(LockFile lock)
 {
     std::sort(lock.packages.begin(),
               lock.packages.end(),
               [](const auto& left, const auto& right)
               { return left.name < right.name; });
     lock.root = lock.computeRootHash();
+    return Miro::toJSONString(lock, lockFileIndent) + '\n';
+}
 
-    auto text = Miro::toJSONString(lock, lockFileIndent) + '\n';
+bool isLockFileCurrent(const eacp::FilePath& path)
+{
+    if (!eacp::Files::exists(path))
+        return true;
+
+    auto text = eacp::Files::readFile(path);
+    return formatLockFile(Miro::createFromJSONString<LockFile>(text)) == text;
+}
+
+void writeLockFile(const eacp::FilePath& path, LockFile lock)
+{
+    auto text = formatLockFile(std::move(lock));
     auto bytes = eacp::Span<const std::uint8_t> {
         reinterpret_cast<const std::uint8_t*>(text.data()), int(text.size())};
     eacp::Files::writeFileAtomically(path, bytes);

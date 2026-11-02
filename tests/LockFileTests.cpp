@@ -70,3 +70,21 @@ auto tRootDependsOnOrderFreeContent = test("LockFile/rootIgnoresInsertionOrder")
     second.storePackage(LockFileTests::createPackage("b", "3"));
     check(first.computeRootHash() != second.computeRootHash());
 };
+
+auto tOlderLockIsNotCurrent = test("LockFile/lockMissingNewFieldsIsNotCurrent") = []
+{
+    auto directory = createEmptyTestDirectory("lock-current");
+    auto path = directory / "lockstep.lock";
+
+    auto lock = lockstep::LockFile {};
+    lock.storePackage(LockFileTests::createPackage("a", "1"));
+    lockstep::writeLockFile(path, lock);
+    check(lockstep::isLockFileCurrent(path));
+
+    auto text = eacp::Files::readFile(path);
+    auto field = text.find("      \"submodules\": [],\n");
+    check(field != std::string::npos);
+    text.erase(field, std::string_view {"      \"submodules\": [],\n"}.size());
+    eacp::Files::writeFile(path, std::string_view {text});
+    check(!lockstep::isLockFileCurrent(path));
+};

@@ -487,6 +487,15 @@ int runBeginCommand(const CommandOptions& options)
     checkModeIsKnown(options.mode);
     checkLoadedDuringProject(options);
 
+    if (options.mode != updateMode && !isLockFileCurrent(options.lock))
+    {
+        printStatus(
+            "WARNING: " + options.lock.str()
+            + " is not in the form this lockstep writes (it is from another "
+              "version, or was edited by hand). Rewrite it with: cmake -B <build> "
+              "-DLOCKSTEP_MODE=update");
+    }
+
     auto session = Session {};
 
     for (const auto& definition: options.overrides)
@@ -571,6 +580,14 @@ int runVerifyCommand(const CommandOptions& options)
         printStatus("FAILED " + package.name + ": "
                     + cache.getSourceDirectory(package.hash).str()
                     + " is missing or no longer hashes to " + package.hash);
+        ++failedCount;
+    }
+
+    if (!isLockFileCurrent(options.lock))
+    {
+        printStatus("FAILED: " + options.lock.str()
+                    + " is not in the form this lockstep writes; rewrite it with "
+                      "lockstep update");
         ++failedCount;
     }
 
