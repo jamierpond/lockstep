@@ -340,7 +340,7 @@ auto tMiniaudio = test("Arguments/makeASoundMiniaudioCallIsAccepted") = []
          "DOWNLOAD_NO_PROGRESS",
          "YES",
          "QUIET"});
-    check(spec.kind == "archive");
+    check(spec.kind == lockstep::PackageKind::archive);
     check(spec.isDownloadOnly);
     check(spec.url
           == "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.zip");
@@ -353,7 +353,7 @@ auto tIgnoredSweep = test("Arguments/everyIgnoredKeywordIsAcceptedWithAValue") =
         auto bare = parsePackageArguments(withGitSource({std::string {keyword}}));
         auto valued = parsePackageArguments(
             withGitSource({std::string {keyword}, "first", "second", "SYSTEM"}));
-        check(bare.kind == "git");
+        check(bare.kind == lockstep::PackageKind::git);
         check(valued.isSystem);
     }
 };

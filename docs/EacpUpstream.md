@@ -16,6 +16,7 @@ implemented yet. Line numbers are from lockstep `origin/main` at the
 | `Files::setExecutable(path)` | `Core/Utils/Files.h` | `PinnedRelease.cpp:62` `makeExecutable` |
 | `Files::readSymlink(path)` | `Core/Utils/Files.h` | `MerkleHash.cpp:41` `read_symlink` |
 | `Files::writeFileAtomically(path, std::string_view)` | `Core/Utils/Files.h` | `LockFile.cpp:90-92` `reinterpret_cast` into a `Span`; `writeFile` got this overload in eacp #177 |
+| `FilePath::wide()` emitting `\` separators, as `nativeString()` already does | `Core/Utils/FilePath.h` | `src/LongPath.{h,cpp}`: `wide()` keeps `/`, so `toStdPath`, `MemoryMappedFile` and every `Files` call reach Windows with `/` and a `\\?\` long path never works |
 | `Platform::architectureName()` | `Core/Utils/Platform.h` | `PinnedRelease.cpp:30-37` architecture `#if` |
 
 SHA-256 matters most: the rest are thin wrappers, but it is about 170
