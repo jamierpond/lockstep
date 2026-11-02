@@ -23,6 +23,7 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp
 add_library(lockstep-lib STATIC
         src/CMakeSnippet.cpp
         src/Commands.cpp
+        src/Messages.cpp
         src/Download.cpp
         src/Git.cpp
         src/LockFile.cpp

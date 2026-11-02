@@ -181,6 +181,9 @@ int parseAndRunCommand()
     cli.option("--bootstrap", options.bootstrap, "the project's lockstep.cmake");
     cli.option(
         "--requested-by", options.requestedBy, "the directory asking for a package");
+    cli.option("--requested-by-file",
+               options.requestedByFile,
+               "the CMake file asking for a package");
     cli.option(
         "--output", options.output, "the file add, provide and cmake-module write");
     cli.option(
