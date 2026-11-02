@@ -44,6 +44,18 @@ std::string getPathForLock(const eacp::FilePath& lockPath, const std::string& pa
     return eacp::FilePath {relative}.str();
 }
 
+// Only a bootstrap inside the project is recorded, so the lock's bytes never
+// depend on where the project or anything outside it sits.
+std::string getBootstrapPathForLock(const CommandOptions& options)
+{
+    auto relative = getPathForLock(options.lock, options.bootstrap.str());
+
+    if (relative.starts_with("..") || eacp::FilePath {relative}.isAbsolute())
+        return {};
+
+    return relative;
+}
+
 eacp::FilePath getPathFromLock(const eacp::FilePath& lockPath,
                                const std::string& path)
 {
@@ -221,7 +233,7 @@ eacp::FilePath resolveLockedSource(const CommandOptions& options,
         auto resolved =
             resolvePackage(cache, request, getPatchesForLock(options, spec));
         lock.storePackage(resolved);
-        lock.bootstrap = getPathForLock(options.lock, options.bootstrap.str());
+        lock.bootstrap = getBootstrapPathForLock(options);
         writeLockFile(options.lock, lock);
         return cache.getSourceDirectory(resolved.hash);
     }
@@ -331,6 +343,23 @@ std::string writeAddSubdirectory(const PackageSpec& spec,
     return snippet + ")\n";
 }
 
+// What CPM writes after adding a package, so a later find_package(<Name>) in
+// config mode finds the package already added instead of an installed one.
+std::string writeFindPackageRedirect(const PackageSpec& spec)
+{
+    if (spec.isDownloadOnly)
+        return {};
+
+    auto lowerName = eacp::Strings::toLower(spec.name);
+    auto redirects =
+        std::string {"${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/"} + lowerName;
+    return "file(WRITE \"" + redirects
+           + "-config.cmake\" \"include(\\\"\\${CMAKE_CURRENT_LIST_DIR}/" + lowerName
+           + "-extra.cmake\\\" OPTIONAL)\\n\")\n" + "file(WRITE \"" + redirects
+           + "-config-version.cmake\" \"set(PACKAGE_VERSION_COMPATIBLE TRUE)\\n"
+             "set(PACKAGE_VERSION_EXACT TRUE)\\n\")\n";
+}
+
 std::string writePropagatingBlock(const std::string& name, const std::string& body)
 {
     return "block(SCOPE_FOR VARIABLES PROPAGATE " + name + "_SOURCE_DIR " + name
@@ -367,7 +396,8 @@ std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
 
     return writePropagatingBlock(spec.name,
                                  writePackageVariables(package, true)
-                                     + writeAddSubdirectory(spec, package));
+                                     + writeAddSubdirectory(spec, package)
+                                     + writeFindPackageRedirect(spec));
 }
 
 void writeSnippet(const CommandOptions& options, const std::string& snippet)
