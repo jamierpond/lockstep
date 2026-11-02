@@ -4,6 +4,7 @@
 #include <eacp/Core/Platform/Platform.h>
 #include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Files.h>
+#include <eacp/Core/Utils/TemporaryFile.h>
 #include <eacp/Core/Utils/Strings.h>
 
 #include <algorithm>
@@ -180,11 +181,23 @@ std::string fetchRefIntoMirror(const eacp::FilePath& mirror, const std::string& 
 {
     if (isFullSha(ref) || isRemoteRefName(mirror, ref))
     {
-        runGitOrThrow(createMirrorArguments(
-            mirror,
-            {"fetch", "--quiet", "--no-tags", "--depth", "1", "origin", ref}));
-        return runGitOrThrow(
-            createMirrorArguments(mirror, {"rev-parse", "FETCH_HEAD^{commit}"}));
+        // A ref of this fetch's own rather than FETCH_HEAD, which configures
+        // sharing the mirror would overwrite under each other.
+        auto fetchedRef =
+            "refs/lockstep/" + eacp::TemporaryFile {}.path().fileName();
+        runGitOrThrow(createMirrorArguments(mirror,
+                                            {"fetch",
+                                             "--quiet",
+                                             "--no-tags",
+                                             "--depth",
+                                             "1",
+                                             "origin",
+                                             "+" + ref + ":" + fetchedRef}));
+        auto commit = runGitOrThrow(
+            createMirrorArguments(mirror, {"rev-parse", fetchedRef + "^{commit}"}));
+        runGitOrThrow(
+            createMirrorArguments(mirror, {"update-ref", "-d", fetchedRef}));
+        return commit;
     }
 
     fetchEveryBranchAndTag(mirror);

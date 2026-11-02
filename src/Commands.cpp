@@ -239,6 +239,22 @@ PackageCache createPackageCache(const CommandOptions& options)
     return PackageCache {options.cache, options.cmake};
 }
 
+// CPM's rule: a relative patch is looked for beside the CMake file that names
+// it, then under the directory of the CMakeLists.txt being processed.
+eacp::FilePath findPatchFile(const CommandOptions& options, const std::string& patch)
+{
+    if (!options.requestedByFile.empty())
+    {
+        auto besideFile =
+            makeAbsolute(options.requestedByFile.parentDirectory(), patch);
+
+        if (eacp::Files::isFile(besideFile))
+            return besideFile;
+    }
+
+    return makeAbsolute(options.requestedBy, patch);
+}
+
 std::vector<std::string> getPatchesForLock(const CommandOptions& options,
                                            const PackageSpec& spec)
 {
@@ -246,7 +262,7 @@ std::vector<std::string> getPatchesForLock(const CommandOptions& options,
 
     for (const auto& patch: spec.patches)
     {
-        auto absolute = makeAbsolute(options.requestedBy, patch);
+        auto absolute = findPatchFile(options, patch);
         patches.push_back(getPathForLock(options.lock, absolute.str()));
     }
 
@@ -310,7 +326,7 @@ eacp::FilePath resolveLockedSource(const CommandOptions& options,
     request.archiveHash = spec.archiveHash;
 
     for (const auto& patch: spec.patches)
-        request.patches.add(makeAbsolute(options.requestedBy, patch));
+        request.patches.add(findPatchFile(options, patch));
 
     if (options.mode == updateMode)
     {

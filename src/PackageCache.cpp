@@ -10,6 +10,8 @@
 #include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Environment.h>
 #include <eacp/Core/Utils/Files.h>
+#include <eacp/Core/Utils/TemporaryFile.h>
+#include <eacp/Network/IPC/Lock.h>
 #include <eacp/Core/Utils/Strings.h>
 #include <eacp/Core/Utils/Zip.h>
 #include <eacp/Core/Platform/Platform.h>
@@ -106,6 +108,29 @@ eacp::FilePath findArchiveContentRoot(const eacp::FilePath& extracted)
 
     return extracted;
 }
+constexpr auto mirrorLockTimeout = eacp::Time::MS {10 * 60 * 1000};
+
+// Holds one mirror for this process: configures sharing the cache would
+// otherwise fetch into the same bare repository at once, and git's shallow
+// file cannot take that.
+class MirrorLock
+{
+public:
+    explicit MirrorLock(const std::string& url)
+        : lock("lockstep-mirror-" + computeUrlKey(url))
+        , guard(lock, mirrorLockTimeout)
+    {
+        if (!guard.isLocked())
+        {
+            throw std::runtime_error("another lockstep has been fetching " + url
+                                     + " for ten minutes; try again once it ends");
+        }
+    }
+
+private:
+    eacp::IPC::Lock lock;
+    eacp::IPC::ScopedLock guard;
+};
 } // namespace
 
 PackageCache::PackageCache(eacp::FilePath rootToUse, eacp::FilePath cmakeToUse)
@@ -142,13 +167,14 @@ eacp::FilePath PackageCache::getDownloadPath(const std::string& url) const
     return root / "downloads" / computeUrlKey(url) / name;
 }
 
-eacp::FilePath PackageCache::createStagingDirectory() const
+eacp::TemporaryFile PackageCache::createStagingDirectory() const
 {
     auto stagingRoot = root / "staging";
     eacp::Files::createDirectories(stagingRoot);
 
-    auto staging = eacp::Files::nonexistentChild(stagingRoot, "tree", "");
-    eacp::Files::createDirectories(staging);
+    // A random name, so configures sharing the cache never stage into one tree.
+    auto staging = eacp::TemporaryFile {stagingRoot, ""};
+    eacp::Files::createDirectories(staging.path());
     return staging;
 }
 
@@ -184,7 +210,8 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
                                               const std::string& commit,
                                               Network network) const
 {
-    auto staging = createStagingDirectory();
+    auto stagingReservation = createStagingDirectory();
+    auto staging = stagingReservation.path();
 
     try
     {
@@ -225,6 +252,7 @@ eacp::FilePath PackageCache::fetchCommitIntoMirror(const std::string& name,
                                                    const std::string& commit,
                                                    Network network) const
 {
+    auto mirrorLock = MirrorLock {url};
     auto mirror = getMirrorDirectory(url);
     eacp::Files::createDirectories(mirror.parentDirectory());
     createBareMirror(mirror, url);
@@ -270,6 +298,7 @@ std::string PackageCache::fetchGitTree(const PackageRequest& request,
                 + "' needs the network, which offline mode forbids");
         }
 
+        auto mirrorLock = MirrorLock {request.url};
         eacp::Files::createDirectories(mirror.parentDirectory());
         createBareMirror(mirror, request.url);
         resolvedCommit = fetchRefIntoMirror(mirror, request.ref);
