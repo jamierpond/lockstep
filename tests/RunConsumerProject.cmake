@@ -37,8 +37,22 @@ set(common_arguments
         "-DLOCKSTEP_CACHE=${WORK_DIR}/cache"
         -DCMAKE_BUILD_TYPE=Release)
 
-expect_failure("[^ ]+\\.(txt|cmake):[0-9]+ asks for .*, and there is no lockstep.lock yet"
-        "${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-missing-lock")
+expect_failure("[^ ]+\\.(txt|cmake):[0-9]+ asks for .*, and there is no lockstep.lock yet; offline"
+        "${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-offline-no-lock"
+        -DLOCKSTEP_MODE=offline)
+
+# Locked mode with no lock writes one, as npm install writes package-lock.json;
+# a second locked configure then reads it and changes no byte.
+run_step("${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-first")
+if (NOT step_output MATCHES "lockstep: no lockstep.lock, so wrote one with ${EXPECTED_PACKAGES} packages; commit it.")
+    message(FATAL_ERROR "the first configure did not report writing the lock")
+endif ()
+file(READ "${source}/lockstep.lock" first_lock)
+run_step("${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-second")
+file(READ "${source}/lockstep.lock" second_lock)
+if (NOT first_lock STREQUAL second_lock OR step_output MATCHES "wrote one")
+    message(FATAL_ERROR "the second locked configure rewrote the lock")
+endif ()
 
 run_step("${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-update"
         -DLOCKSTEP_MODE=update)

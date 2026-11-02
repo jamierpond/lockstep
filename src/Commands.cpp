@@ -304,13 +304,14 @@ void checkRequestMatchesLock(const CommandOptions& options,
 }
 
 eacp::FilePath resolveLockedSource(const CommandOptions& options,
-                                   const PackageSpec& spec)
+                                   const PackageSpec& spec,
+                                   const Session& session)
 {
     auto cache = createPackageCache(options);
     auto lock = readLockFile(options.lock);
     auto request = createRequest(options, spec);
 
-    if (options.mode == Mode::update)
+    if (options.mode == Mode::update || session.isWritingNewLock)
     {
         auto resolved =
             resolvePackage(cache, request, getPatchesForLock(options, spec));
@@ -415,7 +416,7 @@ eacp::FilePath resolvePackageSource(const CommandOptions& options,
     if (spec.kind == PackageKind::local)
         return makeAbsolute(options.requestedBy, spec.localSourceDirectory);
 
-    auto cached = resolveLockedSource(options, spec);
+    auto cached = resolveLockedSource(options, spec, session);
 
     if (spec.checkoutDirectory.empty())
         return cached;
@@ -638,6 +639,8 @@ int runBeginCommand(const CommandOptions& options)
     }
 
     auto session = Session {};
+    session.isWritingNewLock =
+        options.mode == Mode::locked && !eacp::Files::exists(options.lock);
 
     for (const auto& definition: options.overrides)
     {
@@ -774,9 +777,19 @@ int runRootCommand(const CommandOptions& options)
         return 0;
     }
 
-    if (eacp::Files::isFile(options.lock))
-        eacp::Console::print("-- lockstep: root "
-                             + readLockFile(options.lock).computeRootHash());
+    if (!eacp::Files::isFile(options.lock))
+        return 0;
+
+    auto lock = readLockFile(options.lock);
+
+    if (readSession(options.buildDirectory).isWritingNewLock)
+    {
+        eacp::Console::print("-- lockstep: no lockstep.lock, so wrote one with "
+                             + std::to_string(lock.packages.size())
+                             + " packages; commit it.");
+    }
+
+    eacp::Console::print("-- lockstep: root " + lock.computeRootHash());
 
     return 0;
 }

@@ -25,8 +25,8 @@ that project pins.
    before `project()`.
 2. Delete `CPM.cmake`. `include(CPM)` lines can stay: lockstep answers them
    with an empty stub, and your `CPMAddPackage` calls work unchanged.
-3. Configure once with `cmake -B build -DLOCKSTEP_MODE=update`, then commit
-   `lockstep.lock`.
+3. Configure as usual. With no lock yet, lockstep writes `lockstep.lock`;
+   commit it.
 
 ## A 30-second demo
 
@@ -41,20 +41,14 @@ project(Demo NONE)
 lockstep_add_package(NAME fmt GITHUB fmtlib/fmt GIT_TAG 11.0.2 DOWNLOAD_ONLY)
 ```
 
-With no lock yet, a plain configure refuses and says what to run:
+The first configure has no lock, so it writes one, as `npm install` writes
+`package-lock.json`:
 
 ```console
 $ cmake -B build
-lockstep: CMakeLists.txt:5 asks for fmt, and there is no lockstep.lock yet.
-  To write the lock, run: cmake -B build -DLOCKSTEP_MODE=update
-```
-
-Write the lock:
-
-```console
-$ cmake -B build -DLOCKSTEP_MODE=update
 lockstep: resolving fmt at '11.0.2' from https://github.com/fmtlib/fmt.git
 lockstep: locked fmt at 0c9fce2ffefecfdce794e1859584e25877b7b592 (content 9cf326c866562a2f60a8ab2ab847e9f6674918b226eb95aec6de2c7ce0ff6649)
+-- lockstep: no lockstep.lock, so wrote one with 1 packages; commit it.
 -- lockstep: root 4a88cf6cb8b629abf641a08dc0d1996ed94f0e4d93fa36be901473050ead16f8
 ```
 

@@ -36,7 +36,10 @@ struct Session
     std::vector<SessionOverride> overrides;
     std::vector<SessionPackage> packages;
 
-    MIRO_REFLECT(overrides, packages)
+    // Locked mode with no lock yet: this configure writes it, as update would.
+    bool isWritingNewLock = false;
+
+    MIRO_REFLECT(overrides, packages, isWritingNewLock)
 
     std::optional<SessionPackage> findPackage(const std::string& name) const;
     std::optional<SessionOverride> findOverride(const std::string& name) const;

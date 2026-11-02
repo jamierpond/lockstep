@@ -102,11 +102,12 @@ std::string describeUnlockedRequest(const UnlockedRequest& request)
     if (!request.lockFileExists)
     {
         return formatUserError(
-            eacp::Strings::format("{} asks for {}, and there is no {} yet.",
+            eacp::Strings::format("{} asks for {}, and there is no {} yet; offline "
+                                  "mode cannot write one.",
                                   location,
                                   request.name,
                                   request.lockFile),
-            eacp::Strings::format("To write the lock, run: {}", fix));
+            "To write it, configure once without -DLOCKSTEP_MODE=offline.");
     }
 
     return formatUserError(eacp::Strings::format("{} asks for {}, which {} does "

@@ -39,8 +39,9 @@ auto tNoLockFile = test("Messages/missingLockFileSaysHowToWriteIt") = []
     auto text = describeUnlockedRequest(
         {{"CMakeLists.txt", requestLine}, "fmt", "lockstep.lock", false, "build"});
     check(text
-          == "CMakeLists.txt:5 asks for fmt, and there is no lockstep.lock yet.\n"
-             "  To write the lock, run: cmake -B build -DLOCKSTEP_MODE=update");
+          == "CMakeLists.txt:5 asks for fmt, and there is no lockstep.lock yet; "
+             "offline mode cannot write one.\n"
+             "  To write it, configure once without -DLOCKSTEP_MODE=offline.");
 };
 
 auto tUnknownUpdateName = test("Messages/unknownUpdateNameListsTheLock") = []
