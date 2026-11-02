@@ -18,7 +18,9 @@ that project pins.
 
 ## Switching from CPM
 
-1. Copy [`cmake/lockstep.cmake`](cmake/lockstep.cmake) into your project and
+1. Download `lockstep.cmake` from the
+   [latest release](https://github.com/jamierpond/lockstep/releases/latest)'s
+   assets (it pins that release and its hashes) into `cmake/` and
    put `set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES ${CMAKE_CURRENT_LIST_DIR}/cmake/lockstep.cmake)`
    before `project()`.
 2. Delete `CPM.cmake`. `include(CPM)` lines can stay: lockstep answers them
@@ -28,8 +30,8 @@ that project pins.
 
 ## A 30-second demo
 
-Paste this into an empty directory (it needs `cmake/lockstep.cmake` from this
-repository):
+Paste this into an empty directory, with `cmake/lockstep.cmake` taken from the
+latest release's assets:
 
 ```cmake
 cmake_minimum_required(VERSION 3.25)

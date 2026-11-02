@@ -143,10 +143,6 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: release/lockstep-*
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --generate-notes
       - name: Print cmake/lockstep.cmake with this release's version and hashes
         run: |
           version="${{ steps.assets.outputs.version }}"
@@ -157,10 +153,10 @@ jobs:
           done
           printf '%s\n' "$bootstrap" > lockstep.cmake
           { echo '```cmake'; cat lockstep.cmake; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bootstrap
-          path: lockstep.cmake
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* lockstep.cmake --title "$GITHUB_REF_NAME" --generate-notes
       - name: Update the Homebrew tap and the Scoop bucket
         if: env.PACKAGING_TOKEN != ''
         env:
