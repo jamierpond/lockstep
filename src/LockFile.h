@@ -25,6 +25,7 @@ struct LockedPackage
     SubmoduleSelection submoduleSelection;
     std::string commit;
     std::vector<LockedSubmodule> submodules;
+    bool usesGitLfs = false;
     std::string hash;
 
     MIRO_REFLECT(name,
@@ -35,6 +36,7 @@ struct LockedPackage
                  submoduleSelection,
                  commit,
                  submodules,
+                 usesGitLfs,
                  hash)
 };
 

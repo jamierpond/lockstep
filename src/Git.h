@@ -22,9 +22,40 @@ bool hasCommit(const eacp::FilePath& mirror, const std::string& commit);
 // The commit `ref` names on the remote now: a branch, a tag or a full sha.
 std::string fetchRefIntoMirror(const eacp::FilePath& mirror, const std::string& ref);
 
+enum class GitLfsFiles
+{
+    pointers,
+    content
+};
+
+struct GitLink
+{
+    std::string path;
+    std::string commit;
+};
+
+// One `ls-tree -r` of `commit`: its gitlinks and its .gitattributes files.
+struct GitTreeListing
+{
+    eacp::FilePath mirror;
+    std::string commit;
+    std::vector<GitLink> gitlinks;
+    std::vector<std::string> attributeFiles;
+};
+
+GitTreeListing listTree(const eacp::FilePath& mirror, const std::string& commit);
+
+// True when any .gitattributes in the listing routes files through lfs.
+bool usesGitLfs(const GitTreeListing& listing);
+
+// Fetches every lfs object `commit` needs into the mirror; throws, naming the
+// package to install, when git-lfs is missing.
+void fetchGitLfsObjects(const eacp::FilePath& mirror, const std::string& commit);
+
 void checkOutCommit(const eacp::FilePath& mirror,
                     const std::string& commit,
-                    const eacp::FilePath& destination);
+                    const eacp::FilePath& destination,
+                    GitLfsFiles lfsFiles);
 
 struct GitSubmodule
 {
@@ -33,10 +64,10 @@ struct GitSubmodule
     std::string commit;
 };
 
-// The submodules `.gitmodules` in `tree` lists, each with the commit the
-// gitlink at its path in `commit` names. Empty when there is no .gitmodules.
-std::vector<GitSubmodule> listSubmodules(const eacp::FilePath& mirror,
-                                         const std::string& commit,
+// The gitlinks in the listing that `.gitmodules` in `tree` gives a URL, each
+// with the commit it names. A .gitmodules entry with no gitlink is skipped, as
+// git does.
+std::vector<GitSubmodule> listSubmodules(const GitTreeListing& listing,
                                          const eacp::FilePath& tree);
 
 void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch);

@@ -19,6 +19,7 @@ lockstep::LockedPackage createPackage(const std::string& name,
             {},
             "abc123",
             {},
+            false,
             hash};
 }
 } // namespace LockFileTests
