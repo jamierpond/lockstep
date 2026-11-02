@@ -1,4 +1,7 @@
 #include "Download.h"
+#include "Messages.h"
+#include "Paths.h"
+#include "Sha256.h"
 
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Network/HTTP/Http.h>
@@ -12,9 +15,11 @@ namespace
 constexpr auto httpOkStatus = 200;
 } // namespace
 
-void downloadFile(const std::string& url, const eacp::FilePath& destination)
+void downloadFile(const std::string& url,
+                  const eacp::FilePath& destination,
+                  const ExpectedHash& expected)
 {
-    auto partial = destination.sibling(destination.fileName() + ".part");
+    auto partial = getSiblingWithSuffix(destination, ".part");
     eacp::Files::createDirectories(destination.parentDirectory());
 
     auto response =
@@ -26,6 +31,21 @@ void downloadFile(const std::string& url, const eacp::FilePath& destination)
         throw std::runtime_error("downloading " + url + " failed with HTTP status "
                                  + std::to_string(response.statusCode) + ": "
                                  + response.error);
+    }
+
+    if (!expected.hex.empty())
+    {
+        auto actual = expected.computeHex(partial);
+
+        if (actual != expected.hex)
+        {
+            eacp::Files::removeFile(partial);
+            throw HashMismatchError(formatUserError(
+                url + " hashes to " + expected.algorithm + "=" + actual
+                    + ", not the expected " + expected.algorithm + "=" + expected.hex
+                    + "; the download was deleted",
+                "check that the hash pinned for it is the one its publisher gives"));
+        }
     }
 
     if (!eacp::Files::moveFile(partial, destination))

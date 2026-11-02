@@ -3,6 +3,7 @@
 #include "LockFile.h"
 #include "PackageCache.h"
 #include "PinnedRelease.h"
+#include "Status.h"
 
 #include <eacp/Core/App/App.h>
 #include <eacp/Core/App/AppEnvironment.h>
@@ -34,17 +35,15 @@ constexpr auto commandsHelp = R"(commands:
                  the package's CMake arguments after --)";
 
 constexpr auto argumentSeparator = std::string_view {"--"};
-constexpr auto lockFileName = "lockstep.lock";
-constexpr auto defaultMode = "locked";
 
 eacp::FilePath getCacheDirectory(const eacp::FilePath& requested)
 {
     if (!requested.empty())
         return requested;
 
-    if (auto fromEnvironment = eacp::getEnv("LOCKSTEP_CACHE");
-        fromEnvironment && !fromEnvironment->empty())
-        return eacp::FilePath {*fromEnvironment};
+    if (auto fromEnvironment = eacp::getEnvValue("LOCKSTEP_CACHE");
+        !fromEnvironment.empty())
+        return eacp::FilePath {fromEnvironment};
 
     return lockstep::PackageCache::getDefaultDirectory();
 }
@@ -55,9 +54,16 @@ eacp::FilePath getLockFile(const lockstep::CommandOptions& options)
         return options.lock;
 
     if (!options.sourceDirectory.empty())
-        return options.sourceDirectory / lockFileName;
+        return options.sourceDirectory / lockstep::lockFileName;
 
-    return eacp::FilePath {std::filesystem::current_path()} / lockFileName;
+    return eacp::FilePath {std::filesystem::current_path()} / lockstep::lockFileName;
+}
+
+eacp::Vector<std::string> getArgumentsAfterProgram()
+{
+    auto arguments = eacp::Apps::commandLineArgs();
+    arguments.removeAt(0);
+    return arguments;
 }
 
 std::optional<lockstep::PinnedRelease> findProjectPinnedRelease()
@@ -85,16 +91,14 @@ std::optional<int> runProjectPinnedVersionInstead()
     if (!release || release->version == LOCKSTEP_VERSION)
         return std::nullopt;
 
-    eacp::Console::printError("lockstep: this project pins lockstep "
-                              + release->version + ", so this " + LOCKSTEP_VERSION
-                              + " runs that instead");
+    lockstep::printStatus("this project pins lockstep " + release->version
+                          + ", so this " + LOCKSTEP_VERSION + " runs that instead");
 
     auto executable =
         lockstep::fetchPinnedExecutable(*release, getCacheDirectory({}));
     auto options = eacp::Processes::ProcessOptions {};
     options.executable = executable.str();
-    options.arguments = eacp::Apps::commandLineArgs();
-    options.arguments.removeAt(0);
+    options.arguments = getArgumentsAfterProgram();
     options.environment.add({"LOCKSTEP_EXECUTABLE", executable.str()});
     options.captureOutput = false;
     return eacp::Processes::run(options).exitCode;
@@ -104,9 +108,6 @@ int runCommand(lockstep::CommandOptions options)
 {
     options.cache = getCacheDirectory(options.cache);
     options.lock = getLockFile(options);
-
-    if (options.mode.empty())
-        options.mode = defaultMode;
 
     if (options.command == "begin")
         return lockstep::runBeginCommand(options);
@@ -138,8 +139,7 @@ int parseAndRunCommand()
     if (auto exitCode = runProjectPinnedVersionInstead())
         return *exitCode;
 
-    auto arguments = eacp::Apps::commandLineArgs();
-    arguments.removeAt(0);
+    auto arguments = getArgumentsAfterProgram();
 
     auto options = lockstep::CommandOptions {};
     auto separator =
@@ -151,55 +151,57 @@ int parseAndRunCommand()
         arguments.getVector().erase(separator, arguments.end());
     }
 
-    auto ci = std::string {};
-    auto cli = eacp::Args::Parser {"lockstep", toolDescription};
+    auto ciValue = std::string {};
+    auto parser = eacp::Args::Parser {"lockstep", toolDescription};
 
-    cli.positional(options.command, "command", "see the list below");
-    cli.positional(options.names, "name", "the packages update re-resolves");
-    cli.option(
+    parser.positional(options.command, "command", "see the list below");
+    parser.positional(options.names, "name", "the packages update re-resolves");
+    parser.option(
         "--mode", options.mode, "locked, update or offline [default: locked]");
-    cli.option("--ci", ci, "ON refuses <Name>_SOURCE overrides in locked mode");
-    cli.option("--lock",
-               options.lock,
-               "the lock file [default: <source-dir>/lockstep.lock]");
-    cli.option(
+    parser.option(
+        "--ci", ciValue, "ON refuses <Name>_SOURCE overrides in locked mode");
+    parser.option("--lock",
+                  options.lock,
+                  "the lock file [default: <source-dir>/lockstep.lock]");
+    parser.option(
         "--cache",
         options.cache,
         "the shared cache [default: $LOCKSTEP_CACHE, else the user cache folder]");
-    cli.option("--cmake", options.cmake, "the cmake that extracts tar archives");
-    cli.option(
+    parser.option("--cmake", options.cmake, "the cmake that extracts tar archives");
+    parser.option(
         "--source-dir", options.sourceDirectory, "the top-level source directory");
-    cli.option(
+    parser.option(
         "--build-dir", options.buildDirectory, "the top-level build directory");
-    cli.option("--bootstrap", options.bootstrap, "the project's lockstep.cmake");
-    cli.option(
+    parser.option("--bootstrap", options.bootstrap, "the project's lockstep.cmake");
+    parser.option(
         "--requested-by", options.requestedBy, "the directory asking for a package");
-    cli.option("--requested-by-file",
-               options.requestedByFile,
-               "the CMake file asking for a package");
-    cli.option("--requested-binary-dir",
-               options.requestedBinaryDirectory,
-               "its binary directory, which a relative SOURCE_DIR is under");
-    cli.option(
+    parser.option("--requested-by-file",
+                  options.requestedByFile,
+                  "the CMake file asking for a package");
+    parser.option("--requested-binary-dir",
+                  options.requestedBinaryDirectory,
+                  "its binary directory, which a relative SOURCE_DIR is under");
+    parser.option(
         "--output", options.output, "the file add, provide and cmake-module write");
-    cli.option(
+    parser.option(
         "--top-level-includes",
         options.topLevelIncludes,
         "CMAKE_PROJECT_TOP_LEVEL_INCLUDES, which begin checks holds the bootstrap");
-    cli.option("--override",
-               options.overrides,
-               "LOCKSTEP_<Name>_SOURCE or CPM_<Name>_SOURCE=<dir>, for begin");
-    cli.flag("--full",
-             options.full,
-             "verify rehashes every tree instead of trusting stamps");
-    cli.flag(
-        "--announce", options.announce, "root prints '-- lockstep: root <hash>'");
-    cli.epilogue(commandsHelp);
+    parser.option("--override",
+                  options.overrides,
+                  "LOCKSTEP_<Name>_SOURCE or CPM_<Name>_SOURCE=<dir>, for begin");
+    parser.flag("--full",
+                options.isFullVerify,
+                "verify rehashes every tree instead of trusting stamps");
+    parser.flag("--announce",
+                options.shouldAnnounce,
+                "root prints '-- lockstep: root <hash>'");
+    parser.epilogue(commandsHelp);
 
-    if (auto code = cli.exitCodeFor(cli.parse(arguments)))
+    if (auto code = parser.exitCodeFor(parser.parse(arguments)))
         return *code;
 
-    options.isCI = lockstep::isCMakeTrue(ci);
+    options.isCI = lockstep::isCMakeTrue(ciValue);
     return runCommand(options);
 }
 } // namespace

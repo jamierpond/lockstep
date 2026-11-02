@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PackageKind.h"
 #include "Submodules.h"
 
 #include <optional>
@@ -20,7 +21,7 @@ struct ArchiveHash
 struct PackageSpec
 {
     std::string name;
-    std::string kind;
+    PackageKind kind = PackageKind::git;
     std::string url;
     std::string ref;
     std::string localSourceDirectory;

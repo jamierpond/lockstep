@@ -38,3 +38,22 @@ add_test(NAME Consumer/git-edge-cases
         -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
         -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
         -P ${CMAKE_CURRENT_SOURCE_DIR}/RunGitEdgeCasesProject.cmake)
+
+# Windows is left out: lockstep's cache root there is the known folder, which
+# no environment variable can point at a scratch directory.
+if (NOT WIN32)
+    add_test(NAME Bootstrap/cacheLayoutMatchesLockstep
+            COMMAND ${CMAKE_COMMAND}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/bootstrap-cache
+            -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+            -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBootstrapCacheProject.cmake)
+endif ()
+
+add_test(NAME Consumer/archiveWithWrongHash
+        COMMAND ${CMAKE_COMMAND}
+        -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/archive-bad-hash
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-archive-bad-hash
+        -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+        -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBadHashProject.cmake)

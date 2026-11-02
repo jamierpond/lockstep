@@ -26,18 +26,21 @@ constexpr auto roundConstants = std::array<std::uint32_t, 64> {
     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-constexpr auto initialState = std::array<std::uint32_t, 8> {0x6a09e667,
-                                                            0xbb67ae85,
-                                                            0x3c6ef372,
-                                                            0xa54ff53a,
-                                                            0x510e527f,
-                                                            0x9b05688c,
-                                                            0x1f83d9ab,
-                                                            0x5be0cd19};
+constexpr auto initialState =
+    std::array<std::uint32_t, sha256WordCount> {0x6a09e667,
+                                                0xbb67ae85,
+                                                0x3c6ef372,
+                                                0xa54ff53a,
+                                                0x510e527f,
+                                                0x9b05688c,
+                                                0x1f83d9ab,
+                                                0x5be0cd19};
 
 constexpr auto messageScheduleSize = 64;
 constexpr auto lengthFieldSize = 8;
 constexpr auto bitsPerByte = 8;
+constexpr auto bytesPerWord = 4;
+constexpr auto blockWordCount = sha256BlockSize / bytesPerWord;
 constexpr auto paddingStartByte = std::uint8_t {0x80};
 
 std::uint32_t rotateRight(std::uint32_t value, int bits)
@@ -45,7 +48,7 @@ std::uint32_t rotateRight(std::uint32_t value, int bits)
     return (value >> bits) | (value << (32 - bits));
 }
 
-std::uint32_t readBigEndianWord(const std::uint8_t* bytes)
+std::uint32_t readBigEndianWord(std::span<const std::uint8_t, bytesPerWord> bytes)
 {
     return (std::uint32_t(bytes[0]) << 24) | (std::uint32_t(bytes[1]) << 16)
            | (std::uint32_t(bytes[2]) << 8) | std::uint32_t(bytes[3]);
@@ -57,14 +60,15 @@ Sha256::Sha256()
 {
 }
 
-void Sha256::processBlock(const std::uint8_t* block)
+void Sha256::processBlock(std::span<const std::uint8_t, sha256BlockSize> block)
 {
     auto schedule = std::array<std::uint32_t, messageScheduleSize> {};
 
-    for (auto i = 0; i < 16; ++i)
-        schedule[i] = readBigEndianWord(block + i * 4);
+    for (auto i = 0; i < blockWordCount; ++i)
+        schedule[i] =
+            readBigEndianWord(block.subspan(i * bytesPerWord).first<bytesPerWord>());
 
-    for (auto i = 16; i < messageScheduleSize; ++i)
+    for (auto i = blockWordCount; i < messageScheduleSize; ++i)
     {
         auto s0 = rotateRight(schedule[i - 15], 7)
                   ^ rotateRight(schedule[i - 15], 18) ^ (schedule[i - 15] >> 3);
@@ -119,13 +123,13 @@ void Sha256::update(std::span<const std::uint8_t> bytes)
         if (pendingSize < sha256BlockSize)
             return;
 
-        processBlock(pending.data());
+        processBlock(pending);
         pendingSize = 0;
     }
 
     while (bytes.size() - offset >= sha256BlockSize)
     {
-        processBlock(bytes.data() + offset);
+        processBlock(bytes.subspan(offset).first<sha256BlockSize>());
         offset += sha256BlockSize;
     }
 
@@ -157,12 +161,13 @@ Sha256Digest Sha256::finish()
 
     auto digest = Sha256Digest {};
 
-    for (auto i = 0; i < 8; ++i)
+    for (auto i = 0; i < sha256WordCount; ++i)
     {
-        digest[i * 4] = std::uint8_t(state[i] >> 24);
-        digest[i * 4 + 1] = std::uint8_t(state[i] >> 16);
-        digest[i * 4 + 2] = std::uint8_t(state[i] >> 8);
-        digest[i * 4 + 3] = std::uint8_t(state[i]);
+        for (auto byte = 0; byte < bytesPerWord; ++byte)
+        {
+            auto shift = (bytesPerWord - 1 - byte) * bitsPerByte;
+            digest[i * bytesPerWord + byte] = std::uint8_t(state[i] >> shift);
+        }
     }
 
     return digest;
@@ -217,5 +222,15 @@ Sha256Digest computeFileSha256(const std::filesystem::path& file)
 Sha256Digest computeFileSha256(const eacp::FilePath& file)
 {
     return computeFileSha256(getLongPathSafeStdPath(file));
+}
+
+std::string computeFileSha256Hex(const eacp::FilePath& file)
+{
+    return convertDigestToHex(computeFileSha256(file));
+}
+
+std::string computeFileSha256Hex(const std::filesystem::path& file)
+{
+    return convertDigestToHex(computeFileSha256(file));
 }
 } // namespace lockstep

@@ -19,10 +19,16 @@ enum class Network
     forbidden
 };
 
+enum class Verification
+{
+    trustStamp,
+    rehash
+};
+
 struct PackageRequest
 {
     std::string name;
-    std::string kind;
+    PackageKind kind = PackageKind::git;
     std::string url;
     std::string ref;
     eacp::Vector<eacp::FilePath> patches;
@@ -50,9 +56,9 @@ public:
 
     eacp::FilePath getSourceDirectory(const std::string& hash) const;
 
-    // True when src/<hash> exists and still hashes to `hash`. Without
-    // `alwaysRecompute`, a matching size/mtime stamp stands in for the hash.
-    bool hasIntactEntry(const std::string& hash, bool alwaysRecompute) const;
+    // True when src/<hash> exists and still hashes to `hash`. With
+    // trustStamp, a matching size/mtime stamp stands in for the hash.
+    bool hasIntactEntry(const std::string& hash, Verification verification) const;
 
     void removeEntry(const std::string& hash) const;
 
@@ -64,6 +70,7 @@ public:
 
 private:
     eacp::FilePath getMirrorDirectory(const std::string& url) const;
+    eacp::FilePath getOrCreateMirror(const std::string& url) const;
     eacp::FilePath getDownloadPath(const std::string& url) const;
     eacp::TemporaryFile createStagingDirectory() const;
 

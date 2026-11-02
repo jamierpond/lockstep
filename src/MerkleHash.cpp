@@ -102,7 +102,7 @@ std::string computeEntryHash(const TreeEntry& entry)
     switch (entry.kind)
     {
         case TreeEntryKind::file:
-            return convertDigestToHex(computeFileSha256(entry.path));
+            return computeFileSha256Hex(entry.path);
         case TreeEntryKind::directory:
             return computeMerkleHashOfStdPath(entry.path);
         case TreeEntryKind::symlink:

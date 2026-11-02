@@ -5,6 +5,7 @@
 #include "PackageArguments.h"
 #include "PackageCache.h"
 #include "Session.h"
+#include "Status.h"
 
 #include <eacp/Core/Utils/Console.h>
 #include <eacp/Core/Utils/Environment.h>
@@ -14,6 +15,8 @@
 #include <eacp/Core/Utils/Strings.h>
 
 #include <ResEmbed/ResEmbed.h>
+
+#include <ea_data_structures/Utilities/VectorUtilities.h>
 
 #include "MerkleHash.h"
 
@@ -26,25 +29,21 @@ namespace lockstep
 {
 namespace
 {
-constexpr auto lockedMode = std::string_view {"locked"};
-constexpr auto updateMode = std::string_view {"update"};
-constexpr auto offlineMode = std::string_view {"offline"};
 constexpr auto overrideSuffix = std::string_view {"_SOURCE"};
 constexpr auto overridePrefixes =
     std::array<std::string_view, 2> {"LOCKSTEP_", "CPM_"};
-constexpr auto archiveKind = std::string_view {"archive"};
 
-void printStatus(const std::string& line)
+std::string getOverrideVariableName(std::string_view prefix, const std::string& name)
 {
-    eacp::Console::printError("lockstep: " + line);
+    return std::string {prefix} + name + std::string {overrideSuffix};
 }
 
 // An archive has no commit, so its content hash is what names the version.
-std::string describeVersion(const std::string& kind,
+std::string describeVersion(PackageKind kind,
                             const std::string& commit,
                             const std::string& hash)
 {
-    if (kind == archiveKind)
+    if (kind == PackageKind::archive)
         return "content " + hash;
 
     return commit + " (content " + hash + ")";
@@ -72,17 +71,6 @@ std::string getBootstrapPathForLock(const CommandOptions& options)
         return {};
 
     return relative;
-}
-
-eacp::FilePath getPathFromLock(const eacp::FilePath& lockPath,
-                               const std::string& path)
-{
-    auto asPath = eacp::FilePath {path};
-
-    if (asPath.isAbsolute())
-        return asPath;
-
-    return lockPath.parentDirectory() / path;
 }
 
 eacp::FilePath makeAbsolute(const eacp::FilePath& base, const std::string& path)
@@ -140,7 +128,7 @@ PackageRequest createRequestFromLock(const eacp::FilePath& lockPath,
     request.submoduleSelection = package.submoduleSelection;
 
     for (const auto& patch: package.patches)
-        request.patches.add(getPathFromLock(lockPath, patch));
+        request.patches.add(makeAbsolute(lockPath.parentDirectory(), patch));
 
     return request;
 }
@@ -174,7 +162,7 @@ eacp::FilePath ensureLockedPackageIsCached(const CommandOptions& options,
                                            const LockedPackage& locked,
                                            Network network)
 {
-    if (cache.hasIntactEntry(locked.hash, false))
+    if (cache.hasIntactEntry(locked.hash, Verification::trustStamp))
         return cache.getSourceDirectory(locked.hash);
 
     cache.removeEntry(locked.hash);
@@ -185,12 +173,10 @@ eacp::FilePath ensureLockedPackageIsCached(const CommandOptions& options,
 
     for (const auto& submodule: materialized.submodules)
     {
-        auto isLocked = std::any_of(locked.submodules.begin(),
-                                    locked.submodules.end(),
-                                    [&](const auto& entry)
-                                    { return isSameSubmodule(entry, submodule); });
+        auto isLockedEntry = [&](const LockedSubmodule& entry)
+        { return isSameSubmodule(entry, submodule); };
 
-        if (!isLocked)
+        if (!EA::Vectors::findIf(locked.submodules, isLockedEntry))
         {
             throw std::runtime_error(
                 locked.name + "'s submodule " + submodule.path + " is at "
@@ -217,26 +203,12 @@ eacp::FilePath ensureLockedPackageIsCached(const CommandOptions& options,
     return materialized.sourceDirectory;
 }
 
-Network getNetworkForMode(const std::string& mode)
+Network getNetworkForMode(Mode mode)
 {
-    if (mode == offlineMode)
+    if (mode == Mode::offline)
         return Network::forbidden;
 
     return Network::allowed;
-}
-
-void checkModeIsKnown(const std::string& mode)
-{
-    if (mode == lockedMode || mode == updateMode || mode == offlineMode)
-        return;
-
-    throw std::runtime_error("LOCKSTEP_MODE is '" + mode
-                             + "'; use locked, update or offline");
-}
-
-PackageCache createPackageCache(const CommandOptions& options)
-{
-    return PackageCache {options.cache, options.cmake};
 }
 
 // CPM's rule: a relative patch is looked for beside the CMake file that names
@@ -253,6 +225,23 @@ eacp::FilePath findPatchFile(const CommandOptions& options, const std::string& p
     }
 
     return makeAbsolute(options.requestedBy, patch);
+}
+
+PackageRequest createRequest(const CommandOptions& options, const PackageSpec& spec)
+{
+    auto request = PackageRequest {spec.name, spec.kind, spec.url, spec.ref, {}};
+    request.submoduleSelection = spec.submoduleSelection;
+    request.archiveHash = spec.archiveHash;
+
+    for (const auto& patch: spec.patches)
+        request.patches.add(findPatchFile(options, patch));
+
+    return request;
+}
+
+PackageCache createPackageCache(const CommandOptions& options)
+{
+    return PackageCache {options.cache, options.cmake};
 }
 
 std::vector<std::string> getPatchesForLock(const CommandOptions& options,
@@ -317,18 +306,11 @@ void checkRequestMatchesLock(const CommandOptions& options,
 eacp::FilePath resolveLockedSource(const CommandOptions& options,
                                    const PackageSpec& spec)
 {
-    checkModeIsKnown(options.mode);
-
     auto cache = createPackageCache(options);
     auto lock = readLockFile(options.lock);
-    auto request = PackageRequest {spec.name, spec.kind, spec.url, spec.ref, {}};
-    request.submoduleSelection = spec.submoduleSelection;
-    request.archiveHash = spec.archiveHash;
+    auto request = createRequest(options, spec);
 
-    for (const auto& patch: spec.patches)
-        request.patches.add(findPatchFile(options, patch));
-
-    if (options.mode == updateMode)
+    if (options.mode == Mode::update)
     {
         auto resolved =
             resolvePackage(cache, request, getPatchesForLock(options, spec));
@@ -363,11 +345,10 @@ std::optional<SessionOverride> findOverride(const PackageSpec& spec,
 
     for (auto prefix: overridePrefixes)
     {
-        auto variable =
-            std::string {prefix} + spec.name + std::string {overrideSuffix};
+        auto variable = getOverrideVariableName(prefix, spec.name);
 
-        if (auto value = eacp::getEnv(variable); value && !value->empty())
-            return SessionOverride {spec.name, *value, variable};
+        if (auto value = eacp::getEnvValue(variable); !value.empty())
+            return SessionOverride {spec.name, value, variable};
     }
 
     return std::nullopt;
@@ -417,7 +398,7 @@ eacp::FilePath resolvePackageSource(const CommandOptions& options,
     {
         auto setting = overridden->variable + "=" + overridden->sourceDirectory;
 
-        if (options.isCI && options.mode == lockedMode)
+        if (options.isCI && options.mode == Mode::locked)
         {
             throw std::runtime_error(
                 formatUserError(setting + " overrides " + spec.name
@@ -431,7 +412,7 @@ eacp::FilePath resolvePackageSource(const CommandOptions& options,
         return makeAbsolute(options.sourceDirectory, overridden->sourceDirectory);
     }
 
-    if (spec.kind == "local")
+    if (spec.kind == PackageKind::local)
         return makeAbsolute(options.requestedBy, spec.localSourceDirectory);
 
     auto cached = resolveLockedSource(options, spec);
@@ -449,32 +430,32 @@ std::string getBinaryDirectory(const CommandOptions& options,
     return (options.buildDirectory / "_deps" / (lowerName + "-build")).str();
 }
 
-std::string writeVariable(const std::string& name, const std::string& value)
+std::string createVariable(const std::string& name, const std::string& value)
 {
     return "set(" + name + " " + quoteForCMake(value) + ")\n";
 }
 
-std::string writePackageVariables(const SessionPackage& package, bool isAdded)
+std::string createPackageVariables(const SessionPackage& package, bool isAdded)
 {
     auto snippet = std::string {};
-    snippet += writeVariable(package.name + "_SOURCE_DIR", package.sourceDirectory);
-    snippet += writeVariable(package.name + "_BINARY_DIR", package.binaryDirectory);
+    snippet += createVariable(package.name + "_SOURCE_DIR", package.sourceDirectory);
+    snippet += createVariable(package.name + "_BINARY_DIR", package.binaryDirectory);
 
     if (isAdded)
-        snippet += writeVariable(package.name + "_ADDED", "YES");
+        snippet += createVariable(package.name + "_ADDED", "YES");
     else
-        snippet += writeVariable(package.name + "_ADDED", "NO");
+        snippet += createVariable(package.name + "_ADDED", "NO");
 
-    snippet += writeVariable("CPM_LAST_PACKAGE_NAME", package.name);
-    snippet += writeVariable("CPM_PACKAGE_" + package.name + "_SOURCE_DIR",
-                             package.sourceDirectory);
-    snippet += writeVariable("CPM_PACKAGE_" + package.name + "_BINARY_DIR",
-                             package.binaryDirectory);
+    snippet += createVariable("CPM_LAST_PACKAGE_NAME", package.name);
+    snippet += createVariable("CPM_PACKAGE_" + package.name + "_SOURCE_DIR",
+                              package.sourceDirectory);
+    snippet += createVariable("CPM_PACKAGE_" + package.name + "_BINARY_DIR",
+                              package.binaryDirectory);
     return snippet;
 }
 
-std::string writeAddSubdirectory(const PackageSpec& spec,
-                                 const SessionPackage& package)
+std::string createAddSubdirectory(const PackageSpec& spec,
+                                  const SessionPackage& package)
 {
     auto subdirectory = eacp::FilePath {package.sourceDirectory};
 
@@ -487,7 +468,7 @@ std::string writeAddSubdirectory(const PackageSpec& spec,
     auto snippet = std::string {};
 
     for (const auto& [name, value]: spec.options)
-        snippet += writeVariable(name, value);
+        snippet += createVariable(name, value);
 
     snippet += "set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)\n";
     snippet += "add_subdirectory(" + quoteForCMake(subdirectory.str()) + " "
@@ -504,7 +485,7 @@ std::string writeAddSubdirectory(const PackageSpec& spec,
 
 // What CPM writes after adding a package, so a later find_package(<Name>) in
 // config mode finds the package already added instead of an installed one.
-std::string writeFindPackageRedirect(const PackageSpec& spec)
+std::string createFindPackageRedirect(const PackageSpec& spec)
 {
     if (spec.isDownloadOnly)
         return {};
@@ -521,7 +502,7 @@ std::string writeFindPackageRedirect(const PackageSpec& spec)
 
 // Every command that includes the snippet is a function, so the package's
 // variables are handed on to its caller, as CPM's cpm_export_variables does.
-std::string writePropagatingBlock(const std::string& name, const std::string& body)
+std::string createPropagatingBlock(const std::string& name, const std::string& body)
 {
     auto propagated =
         eacp::Vector<std::string> {name + "_SOURCE_DIR",
@@ -554,8 +535,8 @@ std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
                         + "', which is kept");
         }
 
-        return writePropagatingBlock(spec.name,
-                                     writePackageVariables(*added, false));
+        return createPropagatingBlock(spec.name,
+                                      createPackageVariables(*added, false));
     }
 
     auto package =
@@ -566,10 +547,10 @@ std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
     session.packages.push_back(package);
     writeSession(options.buildDirectory, session);
 
-    return writePropagatingBlock(spec.name,
-                                 writePackageVariables(package, true)
-                                     + writeAddSubdirectory(spec, package)
-                                     + writeFindPackageRedirect(spec));
+    return createPropagatingBlock(spec.name,
+                                  createPackageVariables(package, true)
+                                      + createAddSubdirectory(spec, package)
+                                      + createFindPackageRedirect(spec));
 }
 
 void writeSnippet(const CommandOptions& options, const std::string& snippet)
@@ -587,21 +568,12 @@ bool isSameFile(const eacp::FilePath& first, const std::string& second)
 
 void checkLoadedDuringProject(const CommandOptions& options)
 {
-    auto entries = options.topLevelIncludes;
-    auto start = std::size_t {0};
+    auto isBootstrap = [&](const std::string& entry)
+    { return isSameFile(options.bootstrap, entry); };
+    auto includes = eacp::Strings::split(options.topLevelIncludes, ';');
 
-    while (start <= entries.size())
-    {
-        auto end = entries.find(';', start);
-
-        if (end == std::string::npos)
-            end = entries.size();
-
-        if (isSameFile(options.bootstrap, entries.substr(start, end - start)))
-            return;
-
-        start = end + 1;
-    }
+    if (EA::Vectors::findIf(includes, isBootstrap))
+        return;
 
     throw std::runtime_error(
         options.bootstrap.str()
@@ -654,10 +626,9 @@ PackageSpec parseArgumentsFrom(const CommandOptions& options)
 
 int runBeginCommand(const CommandOptions& options)
 {
-    checkModeIsKnown(options.mode);
     checkLoadedDuringProject(options);
 
-    if (options.mode != updateMode && !isLockFileCurrent(options.lock))
+    if (options.mode != Mode::update && !isLockFileCurrent(options.lock))
     {
         printStatus(formatUserError(
             options.lock.str()
@@ -697,7 +668,7 @@ int runProvideCommand(const CommandOptions& options)
 {
     auto spec = parseArgumentsFrom(options);
 
-    if (spec.kind == "local")
+    if (spec.kind == PackageKind::local)
     {
         writeSnippet(options, {});
         return 0;
@@ -755,7 +726,10 @@ int runVerifyCommand(const CommandOptions& options)
 
     for (const auto& package: lock.packages)
     {
-        if (cache.hasIntactEntry(package.hash, options.full))
+        auto verification =
+            options.isFullVerify ? Verification::rehash : Verification::trustStamp;
+
+        if (cache.hasIntactEntry(package.hash, verification))
         {
             printStatus("ok " + package.name + " " + package.hash);
             continue;
@@ -794,7 +768,7 @@ int runVerifyCommand(const CommandOptions& options)
 
 int runRootCommand(const CommandOptions& options)
 {
-    if (!options.announce)
+    if (!options.shouldAnnounce)
     {
         eacp::Console::print(readLockFile(options.lock).computeRootHash());
         return 0;

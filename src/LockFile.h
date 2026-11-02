@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PackageKind.h"
 #include "Submodules.h"
 
 #include <eacp/Core/Utils/Containers.h>
@@ -14,11 +15,12 @@
 namespace lockstep
 {
 constexpr auto lockFileFormatVersion = 1;
+constexpr auto lockFileName = "lockstep.lock";
 
 struct LockedPackage
 {
     std::string name;
-    std::string kind;
+    PackageKind kind = PackageKind::git;
     std::string url;
     std::string requestedRef;
     std::vector<std::string> patches;
