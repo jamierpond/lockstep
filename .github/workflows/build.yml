@@ -40,9 +40,11 @@ jobs:
         run: |
           chmod +x universal/lockstep
           arch -x86_64 universal/lockstep --help
-          universal/lockstep resolve --mode update --name adder \
-            --url https://github.com/cpm-cmake/testpack-adder.git --ref v1.0.1 \
-            --lock "$RUNNER_TEMP/lockstep.lock" --cache "$RUNNER_TEMP/cache"
+          cmake -S tests/projects/github -B "$RUNNER_TEMP/github" -DLOCKSTEP_MODE=update \
+            "-DLOCKSTEP_SHIM=$PWD/cmake/lockstep.cmake" \
+            "-DLOCKSTEP_EXECUTABLE=$PWD/universal/lockstep" \
+            "-DLOCKSTEP_CACHE=$RUNNER_TEMP/cache"
+          cmake --build "$RUNNER_TEMP/github"
 
   windows:
     strategy:
