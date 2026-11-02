@@ -2,6 +2,8 @@
 
 #include <eacp/Core/Utils/MemoryMappedFile.h>
 
+#include <algorithm>
+
 #include <stdexcept>
 #include <vector>
 
