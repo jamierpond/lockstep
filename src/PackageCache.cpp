@@ -47,6 +47,23 @@ std::string readStamp(const eacp::FilePath& path)
     return eacp::Strings::trim(eacp::Files::readFile(path));
 }
 
+bool checkOutCommitWithLfs(const GitTreeListing& listing,
+                           const eacp::FilePath& destination)
+{
+    const auto& mirror = listing.mirror;
+    const auto& commit = listing.commit;
+
+    if (!usesGitLfs(listing))
+    {
+        checkOutCommit(mirror, commit, destination, GitLfsFiles::pointers);
+        return false;
+    }
+
+    fetchGitLfsObjects(mirror, commit);
+    checkOutCommit(mirror, commit, destination, GitLfsFiles::content);
+    return true;
+}
+
 eacp::FilePath findArchiveContentRoot(const eacp::FilePath& extracted)
 {
     auto options = eacp::Files::DirectoryOptions {};
@@ -144,12 +161,13 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
         eacp::Files::createDirectories(tree);
         auto resolvedCommit = std::string {};
         auto submodules = std::vector<LockedSubmodule> {};
+        auto usesLfs = false;
 
         if (request.kind == archiveKind)
             fetchArchiveTree(request, network, tree);
         else
             resolvedCommit =
-                fetchGitTree(request, commit, network, tree, submodules);
+                fetchGitTree(request, commit, network, tree, submodules, usesLfs);
 
         auto contentRoot = tree;
 
@@ -160,6 +178,7 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
             applyPatch(contentRoot, patch);
 
         auto stored = storeTree(contentRoot, resolvedCommit, std::move(submodules));
+        stored.usesGitLfs = usesLfs;
         removeTreeAtAnyLength(staging);
         return stored;
     }
@@ -201,12 +220,12 @@ eacp::FilePath PackageCache::fetchCommitIntoMirror(const std::string& name,
     return mirror;
 }
 
-std::string
-    PackageCache::fetchGitTree(const PackageRequest& request,
-                               const std::string& commit,
-                               Network network,
-                               const eacp::FilePath& staging,
-                               std::vector<LockedSubmodule>& submodules) const
+std::string PackageCache::fetchGitTree(const PackageRequest& request,
+                                       const std::string& commit,
+                                       Network network,
+                                       const eacp::FilePath& staging,
+                                       std::vector<LockedSubmodule>& submodules,
+                                       bool& usesLfs) const
 {
     auto resolvedCommit = commit;
     auto mirror = getMirrorDirectory(request.url);
@@ -230,30 +249,31 @@ std::string
             request.name, request.url, resolvedCommit, network);
     }
 
-    checkOutCommit(mirror, resolvedCommit, staging);
+    auto listing = listTree(mirror, resolvedCommit);
+    usesLfs = checkOutCommitWithLfs(listing, staging);
     checkOutSubmodules(request.name,
                        request.url,
-                       mirror,
-                       resolvedCommit,
+                       listing,
                        staging,
                        {},
                        request.submoduleSelection,
                        network,
-                       submodules);
+                       submodules,
+                       usesLfs);
     return resolvedCommit;
 }
 
 void PackageCache::checkOutSubmodules(const std::string& name,
                                       const std::string& parentUrl,
-                                      const eacp::FilePath& parentMirror,
-                                      const std::string& parentCommit,
+                                      const GitTreeListing& parentListing,
                                       const eacp::FilePath& tree,
                                       const std::string& pathPrefix,
                                       const SubmoduleSelection& selection,
                                       Network network,
-                                      std::vector<LockedSubmodule>& submodules) const
+                                      std::vector<LockedSubmodule>& submodules,
+                                      bool& usesLfs) const
 {
-    for (const auto& submodule: listSubmodules(parentMirror, parentCommit, tree))
+    for (const auto& submodule: listSubmodules(parentListing, tree))
     {
         auto fullPath = pathPrefix + submodule.path;
         auto isSelected =
@@ -268,20 +288,21 @@ void PackageCache::checkOutSubmodules(const std::string& name,
         auto mirror = fetchCommitIntoMirror(name, url, submodule.commit, network);
         auto destination = tree / submodule.path;
         eacp::Files::createDirectories(destination);
-        checkOutCommit(mirror, submodule.commit, destination);
+        auto submoduleListing = listTree(mirror, submodule.commit);
+        usesLfs = checkOutCommitWithLfs(submoduleListing, destination) || usesLfs;
         submodules.push_back({fullPath, url, submodule.commit});
 
         if (selection.isRecursive)
         {
             checkOutSubmodules(name,
                                url,
-                               mirror,
-                               submodule.commit,
+                               submoduleListing,
                                destination,
                                fullPath + "/",
                                {},
                                network,
-                               submodules);
+                               submodules,
+                               usesLfs);
         }
     }
 }
