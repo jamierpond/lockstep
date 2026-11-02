@@ -47,6 +47,37 @@ std::string readStamp(const eacp::FilePath& path)
     return eacp::Strings::trim(eacp::Files::readFile(path));
 }
 
+eacp::Processes::ProcessResult runPatch(const std::string& executable,
+                                        const eacp::FilePath& tree,
+                                        const eacp::FilePath& patch)
+{
+    auto options = eacp::Processes::ProcessOptions {};
+    options.executable = executable;
+    options.arguments = {"-p1", "-i", patch.str()};
+    options.workingDirectory = tree.str();
+    options.mergeErrorOutput = true;
+    return eacp::Processes::run(options);
+}
+
+// CPM's PATCHES run `patch -p1 < file`, which allows fuzzy context and CRLF
+// differences that `git apply` refuses, so lockstep runs the same program.
+void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch)
+{
+    auto result = runPatch("patch", tree, patch);
+
+    if (!result.launched && eacp::Platform::isWindows())
+        result = runPatch(findGitBundledPatch().str(), tree, patch);
+
+    if (!result.launched)
+        throw std::runtime_error("applying " + patch.str()
+                                 + " needs the patch program, as CPM's PATCHES "
+                                   "does; install patch or put it on PATH");
+
+    if (result.exitCode != 0)
+        throw std::runtime_error("patch -p1 -i " + patch.str() + " failed in "
+                                 + tree.str() + ":\n" + result.output);
+}
+
 bool checkOutCommitWithLfs(const GitTreeListing& listing,
                            const eacp::FilePath& destination)
 {

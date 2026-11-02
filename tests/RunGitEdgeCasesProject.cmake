@@ -1,6 +1,7 @@
 # Locks and re-fetches three local repositories: one with an empty
 # .gitmodules, one whose .gitmodules names a path with no gitlink, and one
-# storing a file in Git LFS. Expects WORK_DIR, LOCKSTEP_EXECUTABLE,
+# storing a file in Git LFS, plus one patched with a patch whose context is a
+# line short, which `patch -p1` applies (as CPM does) and `git apply` refuses. Expects WORK_DIR, LOCKSTEP_EXECUTABLE,
 # LOCKSTEP_SHIM and PROJECT_DIR.
 
 set(lfs_payload "content that lives in lfs, not a pointer\n")
@@ -54,9 +55,19 @@ git(-C "${work}" lfs track payload.bin)
 file(WRITE "${work}/payload.bin" "${lfs_payload}")
 commit_repository("${work}")
 
+create_repository(staleContext)
+file(WRITE "${work}/source.h"
+        "#pragma once\n\n#include <bit>\n#include <execution>\n#include <new>\n\n#ifndef NDEBUG\n#include <iostream>\n#endif\n")
+commit_repository("${work}")
+
 set(fixture_url "file://${WORK_DIR}/fixtures")
 if (CMAKE_HOST_WIN32)
-    set(fixture_url "file:///${WORK_DIR}/fixtures")
+    create_repository(staleContext)
+file(WRITE "${work}/source.h"
+        "#pragma once\n\n#include <bit>\n#include <execution>\n#include <new>\n\n#ifndef NDEBUG\n#include <iostream>\n#endif\n")
+commit_repository("${work}")
+
+set(fixture_url "file:///${WORK_DIR}/fixtures")
 endif ()
 
 configure(TRUE update -DLOCKSTEP_MODE=update)
