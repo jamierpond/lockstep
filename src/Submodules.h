@@ -17,8 +17,6 @@ struct SubmoduleSelection
     bool isRecursive = true;
 
     MIRO_REFLECT(isRestricted, paths, isRecursive)
-
-    bool operator==(const SubmoduleSelection&) const = default;
 };
 
 struct LockedSubmodule
@@ -28,8 +26,6 @@ struct LockedSubmodule
     std::string commit;
 
     MIRO_REFLECT(path, url, commit)
-
-    bool operator==(const LockedSubmodule&) const = default;
 };
 
 // A .gitmodules URL made absolute: "../b.git" or "./b" resolved against the
