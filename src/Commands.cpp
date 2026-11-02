@@ -164,6 +164,7 @@ LockedPackage resolvePackage(const PackageCache& cache,
             request.submoduleSelection,
             materialized.commit,
             materialized.submodules,
+            materialized.usesGitLfs,
             materialized.hash};
 }
 

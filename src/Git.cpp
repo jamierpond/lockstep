@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <sstream>
 #include <stdexcept>
 
 namespace lockstep
@@ -16,15 +15,12 @@ namespace
 {
 constexpr auto gitExecutable = "git";
 constexpr auto fullShaLength = 40;
+constexpr auto gitAttributesFileName = std::string_view {".gitattributes"};
+constexpr auto lfsFilterAttribute = std::string_view {"filter=lfs"};
 
 std::string joinArguments(const eacp::Vector<std::string>& arguments)
 {
-    auto joined = std::string {gitExecutable};
-
-    for (const auto& argument: arguments)
-        joined += ' ' + argument;
-
-    return joined;
+    return std::string {gitExecutable} + ' ' + eacp::Strings::join(arguments, " ");
 }
 
 eacp::Vector<std::string>
@@ -60,32 +56,46 @@ std::string runGitOrThrow(
     return *output;
 }
 
-std::vector<std::string> splitLines(const std::string& text)
+eacp::Vector<std::string> splitLines(const std::string& text)
 {
-    auto lines = std::vector<std::string> {};
-    auto stream = std::istringstream {text};
+    auto lines = eacp::Vector<std::string> {};
 
-    for (auto line = std::string {}; std::getline(stream, line);)
+    for (const auto& line: eacp::Strings::split(text, '\n'))
     {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-
-        if (!line.empty())
-            lines.push_back(line);
+        if (auto trimmed = eacp::Strings::trim(line); !trimmed.empty())
+            lines.add(trimmed);
     }
 
     return lines;
 }
 
-std::vector<std::string> splitWhitespace(const std::string& text)
+bool isGitAttributesPath(const std::string& path)
 {
-    auto fields = std::vector<std::string> {};
-    auto stream = std::istringstream {text};
+    return path == gitAttributesFileName
+           || path.ends_with("/" + std::string {gitAttributesFileName});
+}
 
-    for (auto field = std::string {}; stream >> field;)
-        fields.push_back(field);
+std::string getGitLfsInstallAdvice()
+{
+    if constexpr (eacp::Platform::isWindows())
+        return "install the git-lfs package (winget install GitHub.GitLFS)";
 
-    return fields;
+    if constexpr (eacp::Platform::isMac())
+        return "install the git-lfs package (brew install git-lfs)";
+
+    return "install the git-lfs package (sudo apt install git-lfs, "
+           "or your distribution's equivalent)";
+}
+
+std::string_view removeSubmoduleKeySuffix(std::string_view key)
+{
+    for (auto suffix: {std::string_view {".path"}, std::string_view {".url"}})
+    {
+        if (key.ends_with(suffix))
+            return key.substr(0, key.size() - suffix.size());
+    }
+
+    return {};
 }
 
 bool isFullSha(const std::string& ref)
@@ -137,11 +147,13 @@ std::optional<std::string>
 
     if (result.exitCode != 0)
     {
-        if (eacp::Strings::trim(result.errorOutput).empty())
+        auto errorOutput = eacp::Strings::trim(result.errorOutput);
+
+        if (errorOutput.empty())
             return std::nullopt;
 
         eacp::Console::printError("lockstep: " + joinArguments(arguments) + ":\n"
-                                  + eacp::Strings::trim(result.errorOutput));
+                                  + errorOutput);
         return std::nullopt;
     }
 
@@ -180,10 +192,66 @@ std::string fetchRefIntoMirror(const eacp::FilePath& mirror, const std::string& 
         createMirrorArguments(mirror, {"rev-parse", ref + "^{commit}"}));
 }
 
+GitTreeListing listTree(const eacp::FilePath& mirror, const std::string& commit)
+{
+    auto listing = GitTreeListing {mirror, commit};
+    auto entries = runGitOrThrow(createMirrorArguments(
+        mirror, {"-c", "core.quotepath=off", "ls-tree", "-r", commit}));
+
+    for (const auto& line: splitLines(entries))
+    {
+        auto tab = line.find('\t');
+        auto fields = eacp::Strings::split(line.substr(0, tab), ' ');
+        auto path = line.substr(tab + 1);
+        constexpr auto typeField = 1;
+        constexpr auto shaField = 2;
+
+        if (fields[typeField] == "commit")
+            listing.gitlinks.push_back({path, fields[shaField]});
+        else if (isGitAttributesPath(path))
+            listing.attributeFiles.push_back(path);
+    }
+
+    return listing;
+}
+
+bool usesGitLfs(const GitTreeListing& listing)
+{
+    for (const auto& path: listing.attributeFiles)
+    {
+        auto attributes = runGitOrThrow(createMirrorArguments(
+            listing.mirror, {"cat-file", "-p", listing.commit + ":" + path}));
+
+        if (attributes.find(lfsFilterAttribute) != std::string::npos)
+            return true;
+    }
+
+    return false;
+}
+
+void fetchGitLfsObjects(const eacp::FilePath& mirror, const std::string& commit)
+{
+    if (!runGit({"lfs", "version"}))
+    {
+        throw std::runtime_error("this repository stores files in Git LFS, but "
+                                 "git-lfs is not installed; "
+                                 + getGitLfsInstallAdvice());
+    }
+
+    runGitOrThrow(createMirrorArguments(mirror, {"lfs", "fetch", "origin", commit}));
+}
+
 void checkOutCommit(const eacp::FilePath& mirror,
                     const std::string& commit,
-                    const eacp::FilePath& destination)
+                    const eacp::FilePath& destination,
+                    GitLfsFiles lfsFiles)
 {
+    // The lfs filter is set either way, so the machine's own git config never
+    // decides whether a checkout holds pointer files or their content.
+    auto isSmudging = lfsFiles == GitLfsFiles::content;
+    auto smudge = std::string {isSmudging ? "git-lfs smudge -- %f" : ""};
+    auto process = std::string {isSmudging ? "git-lfs filter-process" : ""};
+    auto required = std::string {isSmudging ? "true" : "false"};
     auto indexFile = destination.sibling(destination.fileName() + ".index");
     auto arguments = createMirrorArguments(mirror,
                                            {"--work-tree=" + destination.str(),
@@ -193,6 +261,12 @@ void checkOutCommit(const eacp::FilePath& mirror,
                                             "core.eol=lf",
                                             "-c",
                                             "core.symlinks=true",
+                                            "-c",
+                                            "filter.lfs.smudge=" + smudge,
+                                            "-c",
+                                            "filter.lfs.process=" + process,
+                                            "-c",
+                                            "filter.lfs.required=" + required,
                                             "checkout",
                                             "--quiet",
                                             "--force",
@@ -204,8 +278,7 @@ void checkOutCommit(const eacp::FilePath& mirror,
     eacp::Files::removeFile(indexFile);
 }
 
-std::vector<GitSubmodule> listSubmodules(const eacp::FilePath& mirror,
-                                         const std::string& commit,
+std::vector<GitSubmodule> listSubmodules(const GitTreeListing& listing,
                                          const eacp::FilePath& tree)
 {
     auto modulesFile = tree / ".gitmodules";
@@ -213,55 +286,35 @@ std::vector<GitSubmodule> listSubmodules(const eacp::FilePath& mirror,
     if (!eacp::Files::isFile(modulesFile))
         return {};
 
-    auto listing = runGitOrThrow({"config",
-                                  "--file",
-                                  modulesFile.str(),
-                                  "--get-regexp",
-                                  "^submodule\\..*\\.(path|url)$"});
-    auto namedSubmodules = std::vector<std::pair<std::string, GitSubmodule>> {};
-    auto findByName = [&](const std::string& name) -> GitSubmodule&
-    {
-        for (auto& [existingName, submodule]: namedSubmodules)
-        {
-            if (existingName == name)
-                return submodule;
-        }
-
-        return namedSubmodules.emplace_back(name, GitSubmodule {}).second;
-    };
-
-    for (const auto& line: splitLines(listing))
-    {
-        constexpr auto keyPrefix = std::string_view {"submodule."};
-        auto space = line.find(' ');
-        auto key = line.substr(0, space);
-        auto value = line.substr(space + 1);
-        auto name = key.substr(keyPrefix.size(), key.rfind('.') - keyPrefix.size());
-
-        if (key.ends_with(".path"))
-            findByName(name).path = value;
-        else
-            findByName(name).url = value;
-    }
-
+    // --list rather than --get-regexp, which exits 1 for a file with no entries.
+    auto settings = runGitOrThrow({"config", "--file", modulesFile.str(), "--list"});
     auto submodules = std::vector<GitSubmodule> {};
 
-    for (auto& [name, submodule]: namedSubmodules)
-        submodules.push_back(submodule);
-
-    for (auto& submodule: submodules)
+    for (const auto& [gitlinkPath, commit]: listing.gitlinks)
     {
-        auto entry = runGitOrThrow(createMirrorArguments(
-            mirror, {"ls-tree", commit, "--", submodule.path}));
-        auto fields = splitWhitespace(entry);
-        constexpr auto gitlinkFieldCount = 4;
-        constexpr auto shaField = 2;
+        auto submodule = GitSubmodule {gitlinkPath, {}, commit};
+        auto lines = splitLines(settings);
 
-        if (fields.size() < gitlinkFieldCount || fields[1] != "commit")
-            throw std::runtime_error(".gitmodules lists " + submodule.path
-                                     + ", which is not a submodule at " + commit);
+        for (const auto& line: lines)
+        {
+            auto equals = line.find('=');
+            auto key = std::string_view {line}.substr(0, equals);
 
-        submodule.commit = fields[shaField];
+            if (!key.ends_with(".path") || line.substr(equals + 1) != gitlinkPath)
+                continue;
+
+            auto urlKey = std::string {removeSubmoduleKeySuffix(key)} + ".url=";
+
+            for (const auto& candidate: lines)
+            {
+                if (candidate.starts_with(urlKey))
+                    submodule.url = candidate.substr(urlKey.size());
+            }
+        }
+
+        // A gitlink .gitmodules does not name is not a submodule git checks out.
+        if (!submodule.url.empty())
+            submodules.push_back(submodule);
     }
 
     return submodules;
