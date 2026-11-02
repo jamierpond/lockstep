@@ -97,6 +97,10 @@ not in the lock is an error naming the subproject that asked.
 
 ## How it works
 
+[docs/Design.md](docs/Design.md) compares lockstep with CPM and covers the
+design choices and the roadmap.
+
+
 `cmake/lockstep.cmake` downloads the `lockstep` binary for the host from this
 repository's GitHub releases, checking the SHA-256 it pins, into
 `<cache>/bin/<version>/`, then includes the CMake module the binary writes
