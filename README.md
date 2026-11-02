@@ -70,7 +70,9 @@ The module defines `CPMAddPackage`, `CPMFindPackage`, `CPMDeclarePackage`,
 `CPMGetPackage` and `CPMUsePackageLock`, and sets `CPM_DIRECTORY`, so a
 dependency's own `include(CPM.cmake)` returns before defining anything and its
 packages land in your lock. `CPMFindPackage` always fetches; it never calls
-`find_package`. `FetchContent_MakeAvailable` goes through lockstep as a CMake
+`find_package`. As in CPM, each added package writes a `Find<Name>.cmake` into
+`<build>/_lockstep/modules`, which is first on `CMAKE_MODULE_PATH`, so a later
+`find_package(<Name>)` gets the package already added. `FetchContent_MakeAvailable` goes through lockstep as a CMake
 dependency provider. In locked mode, a package any of them asks for that is
 not in the lock is an error naming the subproject that asked.
 
@@ -84,7 +86,8 @@ matches it). Every command in that module forwards its arguments to the
 binary, which parses them, resolves the package and writes the CMake to run:
 the option variables, `<Name>_SOURCE_DIR` and the `add_subdirectory`. Resolving
 fetches into a bare git mirror in the cache, checks out the commit with
-line-ending conversion off, applies the patches, and stores the tree under
+line-ending conversion off, checks out every submodule at the commit the
+parent records (recursively, each through its own mirror), applies the patches, and stores the tree under
 `<cache>/src/<merkle hash>`. The Merkle hash covers each entry's name, type
 (file, symlink or directory) and contents; a directory's hash is the SHA-256 of
 its sorted entries, and `.git` is excluded. Execute bits are not part of it, so
@@ -97,7 +100,6 @@ the same lock verifies on Windows.
   returns at once and fetches nothing, but that one download happens, and
   needs the network even in offline mode the first time. The script overwrites
   `CPM_DOWNLOAD_LOCATION`, so lockstep cannot redirect it.
-- Git submodules are not checked out.
 - FetchContent's `PATCH_COMMAND` is refused, since its result cannot be hashed;
   use `PATCHES`.
 - Symlinks in a dependency hash differently on Windows when git checks them

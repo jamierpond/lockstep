@@ -4,5 +4,8 @@ project(CpmSample LANGUAGES CXX)
 
 CPMAddPackage("gh:cpm-cmake/testpack-fibadder@1.1.0")
 
+# CPM writes a find module per package, so find_package finds the added one.
+find_package(testpack-fibadder REQUIRED)
+
 add_executable(sample main.cpp)
 target_link_libraries(sample PRIVATE fibadder)

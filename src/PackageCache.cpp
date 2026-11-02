@@ -184,21 +184,57 @@ std::string PackageCache::fetchGitTree(const PackageRequest& request,
 
         resolvedCommit = fetchRefIntoMirror(mirror, request.ref);
     }
-    else if (!hasCommit(mirror, resolvedCommit))
+    else
     {
-        if (network == Network::forbidden)
-        {
-            throw std::runtime_error(
-                request.name + " commit " + resolvedCommit
-                + " is not in the cache and offline mode forbids "
-                  "fetching it");
-        }
-
-        fetchRefIntoMirror(mirror, resolvedCommit);
+        ensureCommitInMirror(mirror, request.name, resolvedCommit, network);
     }
 
     checkOutCommit(mirror, resolvedCommit, staging);
+    checkOutSubmodules(request.url, mirror, resolvedCommit, staging, network);
     return resolvedCommit;
+}
+
+void PackageCache::ensureCommitInMirror(const eacp::FilePath& mirror,
+                                        const std::string& name,
+                                        const std::string& commit,
+                                        Network network) const
+{
+    if (hasCommit(mirror, commit))
+        return;
+
+    if (network == Network::forbidden)
+    {
+        throw std::runtime_error(name + " commit " + commit
+                                 + " is not in the cache and offline mode forbids "
+                                   "fetching it");
+    }
+
+    fetchRefIntoMirror(mirror, commit);
+}
+
+// The parent's commit pins every submodule's, so the tree stays hermetic.
+void PackageCache::checkOutSubmodules(const std::string& url,
+                                      const eacp::FilePath& mirror,
+                                      const std::string& commit,
+                                      const eacp::FilePath& tree,
+                                      Network network) const
+{
+    for (const auto& submodule: listSubmodules(mirror, commit, tree, url))
+    {
+        auto submoduleMirror = getMirrorDirectory(submodule.url);
+        auto submoduleTree = tree / submodule.path;
+        eacp::Files::createDirectories(submoduleMirror.parentDirectory());
+        createBareMirror(submoduleMirror, submodule.url);
+        ensureCommitInMirror(
+            submoduleMirror, submodule.url, submodule.commit, network);
+        eacp::Files::createDirectories(submoduleTree);
+        checkOutCommit(submoduleMirror, submodule.commit, submoduleTree);
+        checkOutSubmodules(submodule.url,
+                           submoduleMirror,
+                           submodule.commit,
+                           submoduleTree,
+                           network);
+    }
 }
 
 void PackageCache::fetchArchiveTree(const PackageRequest& request,

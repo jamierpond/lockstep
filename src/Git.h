@@ -25,5 +25,19 @@ void checkOutCommit(const eacp::FilePath& mirror,
                     const std::string& commit,
                     const eacp::FilePath& destination);
 
+struct Submodule
+{
+    std::string path;
+    std::string url;
+    std::string commit;
+};
+
+// The submodules `commit` records, read from the .gitmodules checked out into
+// `tree`, with relative URLs resolved against `parentUrl`.
+eacp::Vector<Submodule> listSubmodules(const eacp::FilePath& mirror,
+                                       const std::string& commit,
+                                       const eacp::FilePath& tree,
+                                       const std::string& parentUrl);
+
 void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch);
 } // namespace lockstep

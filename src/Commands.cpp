@@ -25,6 +25,7 @@ constexpr auto updateMode = std::string_view {"update"};
 constexpr auto offlineMode = std::string_view {"offline"};
 constexpr auto overrideSuffix = std::string_view {"_SOURCE"};
 constexpr auto overridePrefix = std::string_view {"LOCKSTEP_"};
+constexpr auto findModuleDirectoryName = std::string_view {"modules"};
 
 void printStatus(const std::string& line)
 {
@@ -315,6 +316,29 @@ std::string writePropagatingBlock(const std::string& name, const std::string& bo
            + "endblock()\n";
 }
 
+eacp::FilePath getFindModuleDirectory(const CommandOptions& options)
+{
+    return options.buildDirectory / "_lockstep"
+           / std::string {findModuleDirectoryName};
+}
+
+// CPM's find module: a later find_package(<Name>) adds the package again, which
+// returns the one already added, instead of searching the system for it.
+void writeFindModule(const CommandOptions& options, const std::string& name)
+{
+    auto body = std::string {"CPMAddPackage("};
+
+    for (const auto& argument: options.packageArguments)
+        body += quoteForCMake(argument) + " ";
+
+    body += ")\nset(" + name + "_FOUND TRUE)\n";
+
+    auto directory = getFindModuleDirectory(options);
+    eacp::Files::createDirectories(directory);
+    eacp::Files::writeFile(directory / ("Find" + name + ".cmake"),
+                           std::string_view {body});
+}
+
 std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
 {
     auto session = readSession(options.buildDirectory);
@@ -340,6 +364,7 @@ std::string addPackage(const CommandOptions& options, const PackageSpec& spec)
                         getBinaryDirectory(options, spec.name)};
     session.packages.push_back(package);
     writeSession(options.buildDirectory, session);
+    writeFindModule(options, spec.name);
 
     return writePropagatingBlock(spec.name,
                                  writePackageVariables(package, true)
@@ -428,6 +453,7 @@ int runBeginCommand(const CommandOptions& options)
     }
 
     writeSession(options.buildDirectory, session);
+    eacp::Files::removeAll(getFindModuleDirectory(options));
     return 0;
 }
 

@@ -73,6 +73,64 @@ void fetchEveryBranchAndTag(const eacp::FilePath& mirror)
 
     runGitOrThrow(arguments);
 }
+bool isRelativeUrl(const std::string& url)
+{
+    return url.starts_with("./") || url.starts_with("../");
+}
+
+// git's rule: each leading ../ drops one path component of the parent's URL.
+std::string resolveRelativeUrl(std::string parentUrl, std::string_view relative)
+{
+    while (parentUrl.ends_with('/'))
+        parentUrl.pop_back();
+
+    while (true)
+    {
+        if (relative.starts_with("./"))
+        {
+            relative.remove_prefix(2);
+        }
+        else if (relative.starts_with("../"))
+        {
+            relative.remove_prefix(3);
+            auto slash = parentUrl.find_last_of("/:");
+
+            if (slash == std::string::npos)
+                throw std::runtime_error("cannot resolve submodule URL ../ against "
+                                         + parentUrl);
+
+            parentUrl.erase(slash);
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return parentUrl + "/" + std::string {relative};
+}
+
+std::string readSubmoduleSetting(const eacp::FilePath& gitmodules,
+                                 const std::string& key)
+{
+    return runGitOrThrow({"config", "--file", gitmodules.str(), "--get", key});
+}
+
+std::string readGitlinkCommit(const eacp::FilePath& mirror,
+                              const std::string& commit,
+                              const std::string& path)
+{
+    auto entry = runGitOrThrow(
+        createMirrorArguments(mirror, {"ls-tree", commit, "--", path}));
+    auto modeTypeAndObject = eacp::Strings::split(entry, '\t', 2)[0];
+    auto fields = eacp::Strings::split(modeTypeAndObject, ' ');
+
+    if (fields.size() != 3 || fields[1] != "commit")
+        throw std::runtime_error(".gitmodules names " + path
+                                 + ", but the tree has no submodule there");
+
+    return fields[2];
+}
 } // namespace
 
 std::optional<std::string>
@@ -160,6 +218,43 @@ void checkOutCommit(const eacp::FilePath& mirror,
 
     runGitOrThrow(arguments, {{"GIT_INDEX_FILE", indexFile.str()}});
     eacp::Files::removeFile(indexFile);
+}
+
+eacp::Vector<Submodule> listSubmodules(const eacp::FilePath& mirror,
+                                       const std::string& commit,
+                                       const eacp::FilePath& tree,
+                                       const std::string& parentUrl)
+{
+    auto gitmodules = tree / ".gitmodules";
+    auto submodules = eacp::Vector<Submodule> {};
+
+    if (!eacp::Files::isFile(gitmodules))
+        return submodules;
+
+    auto pathKeys = runGit({"config",
+                            "--file",
+                            gitmodules.str(),
+                            "--name-only",
+                            "--get-regexp",
+                            "^submodule\\..*\\.path$"});
+
+    if (!pathKeys)
+        return submodules;
+
+    for (const auto& pathKey: eacp::Strings::split(*pathKeys, '\n'))
+    {
+        auto key = std::string {pathKey};
+        auto prefix = key.substr(0, key.size() - std::string_view {".path"}.size());
+        auto path = readSubmoduleSetting(gitmodules, key);
+        auto url = readSubmoduleSetting(gitmodules, prefix + ".url");
+
+        if (isRelativeUrl(url))
+            url = resolveRelativeUrl(parentUrl, url);
+
+        submodules.add({path, url, readGitlinkCommit(mirror, commit, path)});
+    }
+
+    return submodules;
 }
 
 void applyPatch(const eacp::FilePath& tree, const eacp::FilePath& patch)

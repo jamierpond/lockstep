@@ -61,6 +61,15 @@ private:
                              const std::string& commit,
                              Network network,
                              const eacp::FilePath& staging) const;
+    void ensureCommitInMirror(const eacp::FilePath& mirror,
+                              const std::string& name,
+                              const std::string& commit,
+                              Network network) const;
+    void checkOutSubmodules(const std::string& url,
+                            const eacp::FilePath& mirror,
+                            const std::string& commit,
+                            const eacp::FilePath& tree,
+                            Network network) const;
     void fetchArchiveTree(const PackageRequest& request,
                           Network network,
                           const eacp::FilePath& staging) const;

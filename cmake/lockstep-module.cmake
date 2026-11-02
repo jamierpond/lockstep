@@ -25,6 +25,10 @@ execute_process(COMMAND ${_LOCKSTEP_COMMAND} begin ${_lockstep_overrides}
         "--top-level-includes=${CMAKE_PROJECT_TOP_LEVEL_INCLUDES}"
         COMMAND_ERROR_IS_FATAL ANY)
 
+# Each added package writes a Find<Name>.cmake here, as CPM does, so a later
+# find_package(<Name>) gets the added package.
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_BINARY_DIR}/_lockstep/modules")
+
 macro(_lockstep_run command)
     execute_process(COMMAND ${_LOCKSTEP_COMMAND} ${command}
             "--requested-by=${CMAKE_CURRENT_SOURCE_DIR}"
