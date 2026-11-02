@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 
@@ -12,44 +13,45 @@ namespace lockstep
 namespace
 {
 constexpr auto valueKeywords =
-    std::array<std::string_view, 13> {"NAME",
-                                      "VERSION",
-                                      "GIT_TAG",
-                                      "GITHUB",
-                                      "GITHUB_REPOSITORY",
-                                      "GITLAB_REPOSITORY",
-                                      "BITBUCKET_REPOSITORY",
-                                      "GIT_REPOSITORY",
-                                      "SOURCE_DIR",
-                                      "SOURCE_SUBDIR",
-                                      "URI",
-                                      "URL_HASH",
-                                      "GIT_SUBMODULES_RECURSE"};
+    std::to_array<std::string_view>({"NAME",
+                                     "VERSION",
+                                     "GIT_TAG",
+                                     "GITHUB",
+                                     "GITHUB_REPOSITORY",
+                                     "GITLAB_REPOSITORY",
+                                     "BITBUCKET_REPOSITORY",
+                                     "GIT_REPOSITORY",
+                                     "SOURCE_DIR",
+                                     "SOURCE_SUBDIR",
+                                     "URI",
+                                     "URL_HASH",
+                                     "URL_MD5",
+                                     "GIT_SUBMODULES_RECURSE"});
 
 // Accepted and without effect: lockstep fetches by exact commit, keys its
 // cache by content, and never calls find_package or runs a sub-build.
 constexpr auto ignoredValueKeywords =
-    std::array<std::string_view, 11> {"GIT_SHALLOW",
-                                      "NO_CACHE",
-                                      "CUSTOM_CACHE_KEY",
-                                      "FIND_PACKAGE_ARGUMENTS",
-                                      "GIT_PROGRESS",
-                                      "DOWNLOAD_EXTRACT_TIMESTAMP",
-                                      "BINARY_DIR",
-                                      "SUBBUILD_DIR",
-                                      "TLS_VERIFY",
-                                      "GIT_REMOTE_UPDATE_STRATEGY",
-                                      "UPDATE_DISCONNECTED"};
+    std::to_array<std::string_view>({"GIT_SHALLOW",
+                                     "NO_CACHE",
+                                     "CUSTOM_CACHE_KEY",
+                                     "FIND_PACKAGE_ARGUMENTS",
+                                     "GIT_PROGRESS",
+                                     "DOWNLOAD_EXTRACT_TIMESTAMP",
+                                     "BINARY_DIR",
+                                     "SUBBUILD_DIR",
+                                     "TLS_VERIFY",
+                                     "GIT_REMOTE_UPDATE_STRATEGY",
+                                     "UPDATE_DISCONNECTED"});
 
 constexpr auto flagKeywords =
-    std::array<std::string_view, 5> {"DOWNLOAD_ONLY",
+    std::to_array<std::string_view>({"DOWNLOAD_ONLY",
                                      "EXCLUDE_FROM_ALL",
                                      "SYSTEM",
                                      "OVERRIDE_FIND_PACKAGE",
-                                     "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR"};
+                                     "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR"});
 
-constexpr auto listKeywords = std::array<std::string_view, 5> {
-    "URL", "OPTIONS", "PATCHES", "GIT_SUBMODULES", "FIND_PACKAGE_ARGS"};
+constexpr auto listKeywords = std::to_array<std::string_view>(
+    {"URL", "OPTIONS", "PATCHES", "GIT_SUBMODULES", "FIND_PACKAGE_ARGS"});
 
 struct RefusedKeyword
 {
@@ -60,27 +62,42 @@ struct RefusedKeyword
 constexpr auto commandReason =
     std::string_view {"runs a command whose result lockstep cannot lock or hash"};
 
-constexpr auto refusedKeywords = std::array<RefusedKeyword, 8> {
-    RefusedKeyword {"DOWNLOAD_COMMAND", commandReason},
-    RefusedKeyword {"UPDATE_COMMAND", commandReason},
-    RefusedKeyword {"PATCH_COMMAND",
-                    "runs a command lockstep cannot hash; use PATCHES"},
-    RefusedKeyword {"CONFIGURE_COMMAND", commandReason},
-    RefusedKeyword {"BUILD_COMMAND", commandReason},
-    RefusedKeyword {"INSTALL_COMMAND", commandReason},
-    RefusedKeyword {"URL_MD5",
-                    "is not checked by lockstep; use URL_HASH SHA256=<hex>"},
-    RefusedKeyword {
-        "FORCE", "would add a second version of a package, and the lock holds one"}};
+constexpr auto refusedKeywords = std::to_array<RefusedKeyword>(
+    {RefusedKeyword {"DOWNLOAD_COMMAND", commandReason},
+     RefusedKeyword {"UPDATE_COMMAND", commandReason},
+     RefusedKeyword {"PATCH_COMMAND",
+                     "runs a command lockstep cannot hash; use PATCHES"},
+     RefusedKeyword {"CONFIGURE_COMMAND", commandReason},
+     RefusedKeyword {"BUILD_COMMAND", commandReason},
+     RefusedKeyword {"INSTALL_COMMAND", commandReason},
+     RefusedKeyword {
+         "FORCE",
+         "would add a second version of a package, and the lock holds one"}});
 
-constexpr auto archiveExtensions = std::array<std::string_view, 7> {
-    ".zip", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar"};
+constexpr auto hashAlgorithms = std::to_array<std::string_view>({"MD5",
+                                                                 "SHA1",
+                                                                 "SHA224",
+                                                                 "SHA256",
+                                                                 "SHA384",
+                                                                 "SHA512",
+                                                                 "SHA3_224",
+                                                                 "SHA3_256",
+                                                                 "SHA3_384",
+                                                                 "SHA3_512"});
+
+constexpr auto archiveExtensions = std::to_array<std::string_view>(
+    {".zip", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar"});
+
+constexpr auto githubPrefix = std::string_view {"gh:"};
+constexpr auto gitlabPrefix = std::string_view {"gl:"};
+constexpr auto bitbucketPrefix = std::string_view {"bb:"};
+constexpr auto gitExtension = std::string_view {".git"};
+
+constexpr auto trueWords =
+    std::to_array<std::string_view>({"YES", "ON", "TRUE", "1", "Y"});
 
 constexpr auto falseWords =
-    std::array<std::string_view, 6> {"NO", "OFF", "FALSE", "0", "N", "IGNORE"};
-
-constexpr auto booleanWords = std::array<std::string_view, 12> {
-    "YES", "ON", "TRUE", "1", "Y", "NO", "OFF", "FALSE", "0", "N", "IGNORE", ""};
+    std::to_array<std::string_view>({"NO", "OFF", "FALSE", "0", "N", "IGNORE", ""});
 
 template <std::size_t Size>
 bool isOneOf(const std::array<std::string_view, Size>& words, std::string_view text)
@@ -88,18 +105,12 @@ bool isOneOf(const std::array<std::string_view, Size>& words, std::string_view t
     return std::find(words.begin(), words.end(), text) != words.end();
 }
 
-bool isBooleanWord(std::string_view text)
+template <std::size_t Size>
+bool isOneOfIgnoringCase(const std::array<std::string_view, Size>& words,
+                         std::string_view text)
 {
-    return std::any_of(booleanWords.begin(),
-                       booleanWords.end(),
-                       [&](auto word)
-                       { return eacp::Strings::equalsCaseInsensitive(word, text); });
-}
-
-bool isFalseWord(std::string_view text)
-{
-    return std::any_of(falseWords.begin(),
-                       falseWords.end(),
+    return std::any_of(words.begin(),
+                       words.end(),
                        [&](auto word)
                        { return eacp::Strings::equalsCaseInsensitive(word, text); });
 }
@@ -122,64 +133,41 @@ bool isKeyword(std::string_view text)
            || findRefusalReason(text).has_value();
 }
 
-bool hasSuffix(std::string_view text, std::string_view suffix)
-{
-    return text.size() >= suffix.size()
-           && text.substr(text.size() - suffix.size()) == suffix;
-}
-
 bool isArchiveUrl(std::string_view url)
 {
     return std::any_of(archiveExtensions.begin(),
                        archiveExtensions.end(),
-                       [&](auto extension) { return hasSuffix(url, extension); });
+                       [&](auto extension) { return url.ends_with(extension); });
 }
 
 struct KeywordValues
 {
-    std::vector<std::pair<std::string, std::string>> values;
-    std::vector<std::pair<std::string, std::vector<std::string>>> lists;
-    std::vector<std::pair<std::string, bool>> flags;
+    std::map<std::string, std::string, std::less<>> values;
+    std::map<std::string, std::vector<std::string>, std::less<>> lists;
+    std::map<std::string, bool, std::less<>> flags;
 
     std::optional<std::string> findValue(std::string_view keyword) const
     {
-        for (const auto& [key, value]: values)
-        {
-            if (key == keyword)
-                return value;
-        }
+        if (auto found = values.find(keyword); found != values.end())
+            return found->second;
 
         return std::nullopt;
     }
 
     std::vector<std::string> findList(std::string_view keyword) const
     {
-        for (const auto& [key, list]: lists)
-        {
-            if (key == keyword)
-                return list;
-        }
+        if (auto found = lists.find(keyword); found != lists.end())
+            return found->second;
 
         return {};
     }
 
-    bool hasList(std::string_view keyword) const
-    {
-        return std::any_of(lists.begin(),
-                           lists.end(),
-                           [&](const auto& entry)
-                           { return entry.first == keyword; });
-    }
+    bool hasList(std::string_view keyword) const { return lists.contains(keyword); }
 
     bool isFlagSet(std::string_view keyword) const
     {
-        for (const auto& [key, isSet]: flags)
-        {
-            if (key == keyword)
-                return isSet;
-        }
-
-        return false;
+        auto found = flags.find(keyword);
+        return found != flags.end() && found->second;
     }
 };
 
@@ -196,10 +184,10 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
         {
             auto isSet = true;
 
-            if (index < arguments.size() && isBooleanWord(arguments[index]))
-                isSet = !isFalseWord(arguments[index++]);
+            if (index < arguments.size() && isCMakeBoolean(arguments[index]))
+                isSet = !isCMakeFalse(arguments[index++]);
 
-            collected.flags.emplace_back(keyword, isSet);
+            collected.flags.emplace(keyword, isSet);
         }
         else if (auto reason = findRefusalReason(keyword))
         {
@@ -215,7 +203,7 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
             if (index >= arguments.size())
                 throw std::invalid_argument(keyword + " needs a value");
 
-            collected.values.emplace_back(keyword, arguments[index++]);
+            collected.values.emplace(keyword, arguments[index++]);
         }
         else if (isOneOf(listKeywords, keyword))
         {
@@ -224,7 +212,7 @@ KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
             while (index < arguments.size() && !isKeyword(arguments[index]))
                 list.push_back(arguments[index++]);
 
-            collected.lists.emplace_back(keyword, list);
+            collected.lists.emplace(keyword, list);
         }
         else
         {
@@ -256,12 +244,12 @@ std::vector<std::string> expandShorthand(std::string text)
         text.resize(at);
     }
 
-    if (text.starts_with("gh:"))
-        expanded = {"GITHUB_REPOSITORY", text.substr(3)};
-    else if (text.starts_with("gl:"))
-        expanded = {"GITLAB_REPOSITORY", text.substr(3)};
-    else if (text.starts_with("bb:"))
-        expanded = {"BITBUCKET_REPOSITORY", text.substr(3)};
+    if (text.starts_with(githubPrefix))
+        expanded = {"GITHUB_REPOSITORY", text.substr(githubPrefix.size())};
+    else if (text.starts_with(gitlabPrefix))
+        expanded = {"GITLAB_REPOSITORY", text.substr(gitlabPrefix.size())};
+    else if (text.starts_with(bitbucketPrefix))
+        expanded = {"BITBUCKET_REPOSITORY", text.substr(bitbucketPrefix.size())};
     else if (isArchiveUrl(text))
         expanded = {"URL", text};
     else
@@ -299,52 +287,34 @@ std::vector<std::string> expandArguments(const std::vector<std::string>& argumen
     return expanded;
 }
 
-std::string parseUrlHash(const std::string& urlHash)
+ArchiveHash parseUrlHash(const std::string& urlHash)
 {
-    constexpr auto sha256Prefix = std::string_view {"SHA256="};
-    auto prefix = std::string_view {urlHash}.substr(0, sha256Prefix.size());
+    auto equals = urlHash.find('=');
+    auto algorithm = eacp::Strings::toUpper(urlHash.substr(0, equals));
 
-    if (!eacp::Strings::equalsCaseInsensitive(prefix, sha256Prefix))
+    if (equals == std::string::npos || !isOneOf(hashAlgorithms, algorithm))
     {
-        throw std::invalid_argument(
-            "URL_HASH " + urlHash
-            + " is not SHA256=<hex>, the only hash lockstep checks");
+        throw std::invalid_argument("URL_HASH " + urlHash
+                                    + " is not <algorithm>=<hex> with an "
+                                      "algorithm CMake's file(DOWNLOAD) checks");
     }
 
-    return eacp::Strings::toLower(urlHash.substr(sha256Prefix.size()));
+    return {algorithm, eacp::Strings::toLower(urlHash.substr(equals + 1))};
 }
 
+// "NAME VALUE", or "NAME" alone meaning ON, as CPM's cpm_parse_option reads it.
 std::pair<std::string, std::string> splitOption(const std::string& option)
 {
-    auto space = option.find(' ');
+    auto parts = eacp::Strings::split(option, ' ', 2);
 
-    if (space == std::string::npos)
-        throw std::invalid_argument("OPTIONS entry '" + option
-                                    + "' is not 'NAME VALUE'");
+    if (parts.size() < 2)
+        return {option, "ON"};
 
-    auto value = option.substr(space + 1);
-    auto valueStart = value.find_first_not_of(' ');
-
-    if (valueStart == std::string::npos)
-        value.clear();
-    else
-        value = value.substr(valueStart);
-
-    return {option.substr(0, space), value};
+    return {parts[0], eacp::Strings::trim(parts[1])};
 }
 
-void setSourceFromKeywords(PackageSpec& spec,
-                           const KeywordValues& keywords,
-                           ArgumentDialect dialect)
+void setSourceFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
 {
-    if (auto local = keywords.findValue("SOURCE_DIR");
-        local && dialect == ArgumentDialect::cpm)
-    {
-        spec.kind = "local";
-        spec.localSourceDirectory = *local;
-        return;
-    }
-
     auto github = keywords.findValue("GITHUB_REPOSITORY");
 
     if (!github)
@@ -379,6 +349,7 @@ void setSourceFromKeywords(PackageSpec& spec,
     {
         spec.kind = "local";
         spec.localSourceDirectory = *local;
+        return;
     }
     else
     {
@@ -386,8 +357,25 @@ void setSourceFromKeywords(PackageSpec& spec,
                                     "GITLAB_REPOSITORY, BITBUCKET_REPOSITORY, "
                                     "GIT_REPOSITORY, URL or SOURCE_DIR");
     }
+
+    spec.checkoutDirectory = keywords.findValue("SOURCE_DIR").value_or("");
 }
 } // namespace
+
+bool isCMakeTrue(std::string_view value)
+{
+    return isOneOfIgnoringCase(trueWords, value);
+}
+
+bool isCMakeFalse(std::string_view value)
+{
+    return isOneOfIgnoringCase(falseWords, value);
+}
+
+bool isCMakeBoolean(std::string_view value)
+{
+    return isCMakeTrue(value) || isCMakeFalse(value);
+}
 
 std::string getPackageNameFromUrl(const std::string& url)
 {
@@ -400,23 +388,22 @@ std::string getPackageNameFromUrl(const std::string& url)
 
     for (auto extension: archiveExtensions)
     {
-        if (hasSuffix(name, extension))
+        if (name.ends_with(extension))
             return name.substr(0, name.size() - extension.size());
     }
 
-    if (hasSuffix(name, ".git"))
-        return name.substr(0, name.size() - 4);
+    if (name.ends_with(gitExtension))
+        return name.substr(0, name.size() - gitExtension.size());
 
     return name;
 }
 
-PackageSpec parsePackageArguments(const std::vector<std::string>& arguments,
-                                  ArgumentDialect dialect)
+PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
 {
     auto keywords = collectKeywordValues(expandArguments(arguments));
     auto spec = PackageSpec {};
 
-    setSourceFromKeywords(spec, keywords, dialect);
+    setSourceFromKeywords(spec, keywords);
 
     spec.name = keywords.findValue("NAME").value_or("");
 
@@ -450,10 +437,12 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments,
     spec.submoduleSelection.paths = keywords.findList("GIT_SUBMODULES");
 
     if (auto recurse = keywords.findValue("GIT_SUBMODULES_RECURSE"))
-        spec.submoduleSelection.isRecursive = !isFalseWord(*recurse);
+        spec.submoduleSelection.isRecursive = !isCMakeFalse(*recurse);
 
     if (auto urlHash = keywords.findValue("URL_HASH"))
-        spec.archiveSha256 = parseUrlHash(*urlHash);
+        spec.archiveHash = parseUrlHash(*urlHash);
+    else if (auto md5 = keywords.findValue("URL_MD5"))
+        spec.archiveHash = parseUrlHash("MD5=" + *md5);
 
     return spec;
 }

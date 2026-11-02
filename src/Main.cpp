@@ -1,4 +1,5 @@
 #include "Commands.h"
+#include "PackageArguments.h"
 #include "LockFile.h"
 #include "PackageCache.h"
 #include "PinnedRelease.h"
@@ -57,13 +58,6 @@ eacp::FilePath getLockFile(const lockstep::CommandOptions& options)
         return options.sourceDirectory / lockFileName;
 
     return eacp::FilePath {std::filesystem::current_path()} / lockFileName;
-}
-
-bool isTrueCMakeValue(const std::string& value)
-{
-    auto lowered = eacp::Strings::toLower(value);
-    return lowered == "on" || lowered == "true" || lowered == "yes" || lowered == "1"
-           || lowered == "y";
 }
 
 std::optional<lockstep::PinnedRelease> findProjectPinnedRelease()
@@ -164,8 +158,7 @@ int parseAndRunCommand()
     cli.positional(options.names, "name", "the packages update re-resolves");
     cli.option(
         "--mode", options.mode, "locked, update or offline [default: locked]");
-    cli.option(
-        "--ci", ci, "ON refuses LOCKSTEP_<Name>_SOURCE overrides in locked mode");
+    cli.option("--ci", ci, "ON refuses <Name>_SOURCE overrides in locked mode");
     cli.option("--lock",
                options.lock,
                "the lock file [default: <source-dir>/lockstep.lock]");
@@ -184,14 +177,18 @@ int parseAndRunCommand()
     cli.option("--requested-by-file",
                options.requestedByFile,
                "the CMake file asking for a package");
+    cli.option("--requested-binary-dir",
+               options.requestedBinaryDirectory,
+               "its binary directory, which a relative SOURCE_DIR is under");
     cli.option(
         "--output", options.output, "the file add, provide and cmake-module write");
     cli.option(
         "--top-level-includes",
         options.topLevelIncludes,
         "CMAKE_PROJECT_TOP_LEVEL_INCLUDES, which begin checks holds the bootstrap");
-    cli.option(
-        "--override", options.overrides, "LOCKSTEP_<Name>_SOURCE=<dir>, for begin");
+    cli.option("--override",
+               options.overrides,
+               "LOCKSTEP_<Name>_SOURCE or CPM_<Name>_SOURCE=<dir>, for begin");
     cli.flag("--full",
              options.full,
              "verify rehashes every tree instead of trusting stamps");
@@ -202,7 +199,7 @@ int parseAndRunCommand()
     if (auto code = cli.exitCodeFor(cli.parse(arguments)))
         return *code;
 
-    options.isCI = isTrueCMakeValue(ci);
+    options.isCI = lockstep::isCMakeTrue(ci);
     return runCommand(options);
 }
 } // namespace

@@ -115,10 +115,12 @@ lock or asked for at a different URL or ref. Configure ends with
 
 `lockstep_add_package` takes `NAME`, `GITHUB` (or `GITHUB_REPOSITORY`,
 `GITLAB_REPOSITORY`, `GIT_REPOSITORY`), `GIT_TAG` or `VERSION` (meaning tag
-`v<VERSION>`), `URL` for `.zip` and tar archives, `OPTIONS`, `PATCHES` (applied
+`v<VERSION>`), `URL` for `.zip` and tar archives, `OPTIONS` (`"NAME"` alone means ON), `PATCHES` (applied
 with `git apply` before hashing), `SOURCE_SUBDIR`, `DOWNLOAD_ONLY`,
-`EXCLUDE_FROM_ALL`, `SYSTEM`, `SOURCE_DIR` (use a local checkout),
-`URL_HASH SHA256=<hex>` (checked against the archive), `GIT_SUBMODULES` and
+`EXCLUDE_FROM_ALL`, `SYSTEM`, `SOURCE_DIR` (alone, a local checkout; beside a
+repository or URL, where the locked tree is copied, as CPM clones it there),
+`URL_HASH <algorithm>=<hex>` or `URL_MD5` (any algorithm CMake's
+`file(DOWNLOAD EXPECTED_HASH)` takes, checked against the archive), `GIT_SUBMODULES` and
 `GIT_SUBMODULES_RECURSE`. Submodules are checked out recursively by default,
 each at the commit its parent names, and the lock records each one's path, URL
 and commit; `GIT_SUBMODULES` with paths limits them, and `GIT_SUBMODULES ""`
@@ -130,11 +132,11 @@ content. It sets `<Name>_SOURCE_DIR`,
 | Variable | Effect |
 | --- | --- |
 | `LOCKSTEP_MODE` | `locked` (default), `update` (re-resolve every ref and rewrite the lock) or `offline` (use the cache only, never the network) |
-| `LOCKSTEP_<Name>_SOURCE` | Use a local checkout of `<Name>` instead; configure prints a warning |
-| `LOCKSTEP_CI` | `ON` makes a `LOCKSTEP_<Name>_SOURCE` override an error in locked mode |
+| `LOCKSTEP_<Name>_SOURCE` | Use a local checkout of `<Name>` instead; configure prints a warning. `CPM_<Name>_SOURCE` is the same, and `LOCKSTEP_` wins when both are set |
+| `LOCKSTEP_CI` | `ON` makes a `<Name>_SOURCE` override an error in locked mode |
 | `LOCKSTEP_CACHE` | The shared cache (also an environment variable). Default `~/.cache/lockstep`, `$XDG_CACHE_HOME/lockstep`, or `%LOCALAPPDATA%\lockstep` on Windows |
 | `LOCKSTEP_LOCK_FILE` | Default `<top-level source dir>/lockstep.lock` |
-| `LOCKSTEP_EXECUTABLE` | Run this `lockstep` binary instead of downloading the pinned release |
+| `LOCKSTEP_EXECUTABLE` | Run this `lockstep` binary instead of downloading the pinned release. The environment variable wins over the cached value |
 
 ### The command line
 

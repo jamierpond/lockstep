@@ -3,6 +3,7 @@
 #include <eacp/Core/Utils/Containers.h>
 #include <eacp/Core/Utils/FilePath.h>
 
+#include "PackageArguments.h"
 #include "Submodules.h"
 
 #include <string>
@@ -24,7 +25,7 @@ struct PackageRequest
     std::string ref;
     eacp::Vector<eacp::FilePath> patches;
     SubmoduleSelection submoduleSelection;
-    std::string archiveSha256;
+    ArchiveHash archiveHash;
 };
 
 struct MaterializedPackage
@@ -84,6 +85,8 @@ private:
     void fetchArchiveTree(const PackageRequest& request,
                           Network network,
                           const eacp::FilePath& staging) const;
+    std::string computeArchiveHash(const eacp::FilePath& archive,
+                                   const std::string& algorithm) const;
     void extractArchive(const eacp::FilePath& archive,
                         const eacp::FilePath& destination) const;
     MaterializedPackage storeTree(const eacp::FilePath& tree,

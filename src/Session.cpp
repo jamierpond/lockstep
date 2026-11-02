@@ -17,12 +17,12 @@ std::optional<SessionPackage> Session::findPackage(const std::string& name) cons
     return std::nullopt;
 }
 
-std::optional<std::string> Session::findOverride(const std::string& name) const
+std::optional<SessionOverride> Session::findOverride(const std::string& name) const
 {
     for (const auto& entry: overrides)
     {
         if (entry.name == name)
-            return entry.sourceDirectory;
+            return entry;
     }
 
     return std::nullopt;

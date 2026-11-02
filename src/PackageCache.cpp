@@ -314,20 +314,42 @@ void PackageCache::fetchArchiveTree(const PackageRequest& request,
         }
     }
 
-    if (!request.archiveSha256.empty())
+    if (!request.archiveHash.hex.empty())
     {
-        auto actual = convertDigestToHex(computeFileSha256(archive));
+        auto expected = request.archiveHash;
+        auto actual = computeArchiveHash(archive, expected.algorithm);
 
-        if (actual != request.archiveSha256)
+        if (actual != expected.hex)
         {
             eacp::Files::removeFile(archive);
-            throw std::runtime_error(request.url + " hashes to SHA256=" + actual
-                                     + ", not the URL_HASH SHA256="
-                                     + request.archiveSha256);
+            throw std::runtime_error(request.url + " hashes to " + expected.algorithm
+                                     + "=" + actual + ", not the URL_HASH "
+                                     + expected.algorithm + "=" + expected.hex);
         }
     }
 
     extractArchive(archive, staging);
+}
+
+// file(<algorithm>) knows every algorithm URL_HASH may name, SHA-3 included.
+std::string PackageCache::computeArchiveHash(const eacp::FilePath& archive,
+                                             const std::string& algorithm) const
+{
+    auto script = root / "hash-file.cmake";
+    writeTextFile(script,
+                  "file(${ALGORITHM} \"${FILE}\" digest)\nmessage(\"${digest}\")\n");
+
+    auto options = eacp::Processes::ProcessOptions {};
+    options.executable = cmake.str();
+    options.arguments = {
+        "-DALGORITHM=" + algorithm, "-DFILE=" + archive.str(), "-P", script.str()};
+    auto result = eacp::Processes::run(options);
+
+    if (result.exitCode != 0)
+        throw std::runtime_error("cmake could not hash " + archive.str() + ":\n"
+                                 + result.errorOutput);
+
+    return eacp::Strings::toLower(eacp::Strings::trim(result.errorOutput));
 }
 
 void PackageCache::extractArchive(const eacp::FilePath& archive,

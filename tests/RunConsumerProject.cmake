@@ -43,6 +43,10 @@ expect_failure("CMakeLists.txt:[0-9]+ asks for .*, and there is no lockstep.lock
 run_step("${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-update"
         -DLOCKSTEP_MODE=update)
 
+if (step_output MATCHES "locked [^ ]+ at  ")
+    message(FATAL_ERROR "a 'locked' line names an empty version")
+endif ()
+
 file(READ "${source}/lockstep.lock" lock)
 string(JSON package_count LENGTH "${lock}" packages)
 if (NOT package_count EQUAL EXPECTED_PACKAGES)
@@ -73,6 +77,15 @@ string(JSON overridden_name GET "${lock}" packages 0 name)
 expect_failure("LOCKSTEP_CI forbids"
         "${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-ci"
         -DLOCKSTEP_CI=ON "-DLOCKSTEP_${overridden_name}_SOURCE=${WORK_DIR}/source")
+
+expect_failure("CPM_${overridden_name}_SOURCE=.* LOCKSTEP_CI forbids"
+        "${CMAKE_COMMAND}" ${common_arguments} -B "${WORK_DIR}/build-ci-cpm"
+        -DLOCKSTEP_CI=ON "-DCPM_${overridden_name}_SOURCE=${WORK_DIR}/source")
+
+# A reconfigure takes LOCKSTEP_EXECUTABLE from the environment over its cache.
+expect_failure("no such file or directory"
+        "${CMAKE_COMMAND}" -E env "LOCKSTEP_EXECUTABLE=${WORK_DIR}/no-such-lockstep"
+        "${CMAKE_COMMAND}" -S "${source}" -B "${WORK_DIR}/build-offline")
 
 # The lock must not depend on where the project is checked out: write it again
 # from a second checkout at another path, with the bootstrap inside each copy,

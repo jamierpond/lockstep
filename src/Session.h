@@ -26,8 +26,9 @@ struct SessionOverride
 {
     std::string name;
     std::string sourceDirectory;
+    std::string variable;
 
-    MIRO_REFLECT(name, sourceDirectory)
+    MIRO_REFLECT(name, sourceDirectory, variable)
 };
 
 struct Session
@@ -38,7 +39,7 @@ struct Session
     MIRO_REFLECT(overrides, packages)
 
     std::optional<SessionPackage> findPackage(const std::string& name) const;
-    std::optional<std::string> findOverride(const std::string& name) const;
+    std::optional<SessionOverride> findOverride(const std::string& name) const;
 };
 
 eacp::FilePath getSessionPath(const eacp::FilePath& buildDirectory);

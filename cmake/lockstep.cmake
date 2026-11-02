@@ -14,8 +14,9 @@ set(LOCKSTEP_SHA256_linux-arm64 "d919da1823f91a0c2663ad9480b4c267e37536ff06147a5
 
 set(LOCKSTEP_BOOTSTRAP "${CMAKE_CURRENT_LIST_FILE}")
 set(LOCKSTEP_CACHE "$ENV{LOCKSTEP_CACHE}" CACHE PATH "The shared lockstep cache")
-set(LOCKSTEP_EXECUTABLE "$ENV{LOCKSTEP_EXECUTABLE}" CACHE FILEPATH
-        "A lockstep binary to run instead of downloading the pinned release")
+if (DEFINED ENV{LOCKSTEP_EXECUTABLE}) # the environment wins over a stale cache entry
+    set(LOCKSTEP_EXECUTABLE "$ENV{LOCKSTEP_EXECUTABLE}" CACHE FILEPATH "A lockstep binary to run" FORCE)
+endif ()
 
 if (NOT LOCKSTEP_EXECUTABLE)
     string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}" host)

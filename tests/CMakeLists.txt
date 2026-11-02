@@ -20,6 +20,7 @@ add_consumer_project_test(cpm 4)
 add_consumer_project_test(fetchcontent 1)
 add_consumer_project_test(archive 2)
 add_consumer_project_test(cpm-stub 1)
+add_consumer_project_test(cpm-compat 2)
 
 add_test(NAME Consumer/submodules
         COMMAND ${CMAKE_COMMAND}
