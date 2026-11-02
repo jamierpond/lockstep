@@ -8,6 +8,12 @@
       "name": "EADataStructures",
       "patches": [],
       "requestedRef": "main",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
       "url": "https://github.com/eyalamirmusic/cpp_data_structures.git"
     },
     {
@@ -17,6 +23,12 @@
       "name": "ESIMD",
       "patches": [],
       "requestedRef": "main",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
       "url": "https://github.com/eyalamirmusic/ESIMD.git"
     },
     {
@@ -26,6 +38,12 @@
       "name": "Miro",
       "patches": [],
       "requestedRef": "main",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
       "url": "https://github.com/eyalamirmusic/Miro.git"
     },
     {
@@ -35,6 +53,12 @@
       "name": "NanoTest",
       "patches": [],
       "requestedRef": "main",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
       "url": "https://github.com/eyalamirmusic/NanoTest.git"
     },
     {
@@ -44,6 +68,12 @@
       "name": "ResEmbed",
       "patches": [],
       "requestedRef": "main",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
       "url": "https://github.com/eyalamirmusic/ResEmbed.git"
     },
     {
@@ -53,6 +83,12 @@
       "name": "eacp",
       "patches": [],
       "requestedRef": "57b2ef604bd12d340d7c62873da74525611e9071",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
       "url": "https://github.com/eyalamirmusic/eacp.git"
     }
   ],
