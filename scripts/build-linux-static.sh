@@ -6,6 +6,7 @@
 # Run from the repository root:
 #   docker run --rm -v "$PWD":/w -w /w alpine:3.22 scripts/build-linux-static.sh
 set -eu
+set -o pipefail
 
 curl_version=8.23.0
 curl_sha256=e3de77cfa6367083c776a26647fc9f633b538c06c3baa73d931a252ac8f72b49
@@ -35,6 +36,7 @@ cmake --install "$work/curl-build"
 
 cmake -G Ninja -B build-static -DCMAKE_BUILD_TYPE=Release -DLOCKSTEP_FULLY_STATIC=ON \
     -DCMAKE_PREFIX_PATH="$curl_prefix" -DCURL_USE_STATIC_LIBS=ON
-cmake --build build-static
+cmake --build build-static 2>&1 | tee build-static/build.log
+scripts/check-link-warnings.sh build-static/build.log
 ctest --test-dir build-static --output-on-failure
 scripts/check-floor.sh build-static/lockstep

@@ -17,7 +17,9 @@ jobs:
       - name: Build universal binary
         run: |
           cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
-          cmake --build build
+          set -o pipefail
+          cmake --build build 2>&1 | tee build.log
+          scripts/check-link-warnings.sh build.log
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Check the macOS floor
@@ -64,9 +66,14 @@ jobs:
         with:
           arch: ${{ matrix.msvc }}
       - name: Build
+        shell: bash
         run: |
+          set -o pipefail
           cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          cmake --build build 2>&1 | tee build.log
+      - name: Check for linker warnings
+        shell: bash
+        run: scripts/check-link-warnings.sh build.log
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Check no VC++ runtime DLL is imported

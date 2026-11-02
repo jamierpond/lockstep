@@ -37,6 +37,10 @@ target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)
 
 add_executable(lockstep src/Main.cpp)
 target_link_libraries(lockstep PRIVATE lockstep-lib)
+# res_embed_add links ResEmbed into lockstep directly, ahead of eacp-core and
+# Miro, which need it too; without reordering CMake repeats it after them and
+# Apple's ld warns about the duplicate.
+set_property(TARGET lockstep PROPERTY LINK_LIBRARIES_STRATEGY REORDER_FREELY)
 res_embed_add(lockstep
         FILES cmake/lockstep-module.cmake
         NAMESPACE LockstepModule
