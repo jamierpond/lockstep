@@ -327,3 +327,41 @@ auto tRelativeUrls = test("Submodules/relativeUrlsResolveAgainstParent") = []
     check(resolveSubmoduleUrl("file:///tmp/fixtures/top", "../leaf")
           == "file:///tmp/fixtures/leaf");
 };
+
+auto tMiniaudio = test("Arguments/makeASoundMiniaudioCallIsAccepted") = []
+{
+    auto spec = parsePackageArguments(
+        {"NAME",
+         "miniaudio",
+         "URL",
+         "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.zip",
+         "DOWNLOAD_ONLY",
+         "YES",
+         "DOWNLOAD_NO_PROGRESS",
+         "YES",
+         "QUIET"});
+    check(spec.kind == "archive");
+    check(spec.isDownloadOnly);
+    check(spec.url
+          == "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.zip");
+};
+
+auto tIgnoredSweep = test("Arguments/everyIgnoredKeywordIsAcceptedWithAValue") = []
+{
+    for (auto keyword: lockstep::listIgnoredKeywords())
+    {
+        auto bare = parsePackageArguments(withGitSource({std::string {keyword}}));
+        auto valued = parsePackageArguments(
+            withGitSource({std::string {keyword}, "first", "second", "SYSTEM"}));
+        check(bare.kind == "git");
+        check(valued.isSystem);
+    }
+};
+
+auto tOtherSources = test("Arguments/sourcesTheLockCannotHoldAreRefusedByName") = []
+{
+    check(isRejected({"NAME", "a", "SVN_REPOSITORY", "svn://x"}, "SVN_REPOSITORY"));
+    check(isRejected(
+        {"NAME", "a", "URL", "https://x/a.zip", "DOWNLOAD_NO_EXTRACT", "YES"},
+        "DOWNLOAD_NO_EXTRACT"));
+};
