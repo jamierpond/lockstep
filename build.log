@@ -1,0 +1,181 @@
+-- The C compiler identification is AppleClang 21.0.0.21000401
+-- The CXX compiler identification is AppleClang 21.0.0.21000401
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- CPM: Adding package eacp@0 (57b2ef604bd12d340d7c62873da74525611e9071)
+-- The OBJCXX compiler identification is AppleClang 21.0.0.21000401
+-- Detecting OBJCXX compiler ABI info
+-- Detecting OBJCXX compiler ABI info - done
+-- Check for working OBJCXX compiler: /usr/bin/clang++ - skipped
+-- CPM: Adding package ESIMD@ (main)
+-- CPM: Adding package EADataStructures@ (main)
+-- CPM: Adding package ResEmbed@ (main)
+-- CPM: Adding package Miro@ (main)
+-- ResEmbed: C compiler supports #embed, using it
+-- CPM: Adding package NanoTest@ (main)
+-- Configuring done (23.2s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/jamiepond/projects/lockstep-cpm-find-modules-and-submodules/build
+[1/154] Building CXX object _deps/nanotest-build/Lib/CMakeFiles/NanoTestMain.dir/NanoTest/Main.cpp.o
+[2/154] Building CXX object _deps/resembed-build/Lib/CMakeFiles/ResEmbed.dir/ResEmbed/InternalStorage.cpp.o
+[3/154] Building CXX object _deps/resembed-build/Lib/CMakeFiles/ResEmbed.dir/ResEmbed/Entries.cpp.o
+[4/154] Building CXX object _deps/resembed-build/Lib/CMakeFiles/ResEmbed.dir/ResEmbed/ResEmbed.cpp.o
+[5/154] Linking CXX static library _deps/resembed-build/Lib/libResEmbed.a
+[6/154] Building C object _deps/eacp-build/ThirdParty/miniz/CMakeFiles/miniz.dir/miniz.c.o
+[7/154] Building CXX object _deps/nanotest-build/Lib/CMakeFiles/NanoTest.dir/NanoTest/NanoTest.cpp.o
+[8/154] Linking C static library _deps/eacp-build/ThirdParty/miniz/libminiz.a
+[9/154] Linking CXX static library _deps/nanotest-build/Lib/libNanoTest.a
+[10/154] Linking CXX static library _deps/nanotest-build/Lib/libNanoTestMain.a
+[11/154] Building CXX object _deps/resembed-build/Generator/CMakeFiles/ResourceGenerator.dir/ResourceGenerator.cpp.o
+[12/154] Linking CXX executable _deps/resembed-build/Generator/ResourceGenerator
+[13/154] Embedding MiroResources resources for Miro
+[14/154] Building CXX object _deps/eacp-build/ThirdParty/fmt/CMakeFiles/fmt.dir/src/format.cc.o
+[15/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/JSON/Number.cpp.o
+[16/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/XML/Xml.cpp.o
+[17/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Bridge/BindReflector.cpp.o
+[18/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Detail/StringUtilities.cpp.o
+[19/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/CommandExport/ResolvedTypes.cpp.o
+[20/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Reflection/Any.cpp.o
+[21/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Bridge/Bridge.cpp.o
+[22/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/XML/Printer.cpp.o
+[23/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/JSON/Printer.cpp.o
+[24/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/XML/Parser.cpp.o
+[25/154] Building C object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro-MiroResources-Generated/MiroResources_0.c.o
+[26/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Cpp/Cpp.cpp.o
+[27/154] Linking CXX static library _deps/eacp-build/ThirdParty/fmt/libfmt.a
+[28/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Reflection/CommandTable.cpp.o
+[29/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/JSON/Parser.cpp.o
+[30/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/JSON/Json.cpp.o
+[31/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Cpp/CppClient.cpp.o
+[32/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Reflection/ReflectJson.cpp.o
+[33/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Reflection/JsonReflector.cpp.o
+[34/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Reflection/Reflector.cpp.o
+[35/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/CommandExport/CommandExport.cpp.o
+[36/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Unicode/Unicode.cpp.o
+[37/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro-MiroResources-Generated/MiroResources.cpp.o
+[38/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Maths/Mat4.cpp.o
+[39/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/TypeExport/Format.cpp.o
+[40/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/OpenAI/OpenAI.cpp.o
+[41/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Platform/Platform.cpp.o
+[42/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Reflection/XmlReflector.cpp.o
+[43/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Platform/AppInfo.cpp.o
+[44/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/App/App.cpp.o
+[45/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/DynamicLibrary.cpp.o
+[46/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/Async.cpp.o
+[47/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/ReloadableLibrary.cpp.o
+[48/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/TypeExport/CodegenMain.cpp.o
+[49/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/TypeTree/TypeTree.cpp.o
+[50/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Process/BuildRunner.cpp.o
+[51/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/EventLoop.cpp.o
+[52/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Console.cpp.o
+[53/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/HotReloadLoop.cpp.o
+[54/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/Reloadable.cpp.o
+[55/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/Schema/Schema.cpp.o
+[56/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Process/Process.cpp.o
+[57/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Base64.cpp.o
+[58/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/TaskSemaphore.cpp.o
+[59/154] Building CXX object _deps/miro-build/Lib/CMakeFiles/Miro.dir/Miro/TypeScript/TypeScript.cpp.o
+[60/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/ThreadId.cpp.o
+[61/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Environment.cpp.o
+[62/154] Linking CXX static library _deps/miro-build/Lib/libMiro.a
+[63/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/ObjC/AutoReleasePool.mm.o
+[64/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/App/Args.cpp.o
+[65/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/Thread.cpp.o
+[66/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/CallAfter.cpp.o
+[67/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/File.cpp.o
+[68/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/MemoryMappedFile.cpp.o
+[69/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/DynamicLibrary-Posix.cpp.o
+[70/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Platform/ScopedAutoReleasePool-Apple.mm.o
+[71/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/FilePath.cpp.o
+[72/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/SourceWatcher.cpp.o
+[73/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Random.cpp.o
+[74/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/FileWriter.cpp.o
+[75/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/FileWatcher.cpp.o
+[76/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/TemporaryFile.cpp.o
+[77/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Format.cpp.o
+[78/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Strings.cpp.o
+[79/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/ModuleInfo-Apple.cpp.o
+[80/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Logging.cpp.o
+[81/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/DynamicLibrary-Apple.cpp.o
+[82/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/ThreadUtils.mm.o
+[83/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Logging-Posix.cpp.o
+[84/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Time.cpp.o
+[85/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/ObjC/Strings.mm.o
+[86/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Plugins/ModuleInfo-Posix.cpp.o
+[87/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/MemoryMappedFile-Posix.cpp.o
+[88/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/App/LoginItem-macOS.mm.o
+[89/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Environment-Posix.cpp.o
+[90/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/EventLoop-Default.cpp.o
+[91/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Process/SpawnDirectory-Posix.cpp.o
+[92/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Zip.cpp.o
+[93/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/FilePath-Apple.mm.o
+[94/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/EventLoop.mm.o
+[95/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Files.cpp.o
+[96/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/Timer.mm.o
+[97/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Names.cpp.o
+[98/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/Files.mm.o
+[99/154] Building CXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Process/Process-Posix.cpp.o
+[100/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTPServer/ResponseBuilders.cpp.o
+[101/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Channel.cpp.o
+[102/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTPServer/HttpServer.cpp.o
+[103/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Lock.cpp.o
+[104/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/App/Clipboard-macOS.mm.o
+[105/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTP/HttpAsync.cpp.o
+[106/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTPServer/HttpServerDispatcher.cpp.o
+[107/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/TCP/Connection.cpp.o
+[108/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/App/App-macOS.mm.o
+[109/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/TCP/Listener.cpp.o
+[110/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Utils/FilesOpen-macOS.mm.o
+[111/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Core/CMakeFiles/eacp-core.dir/Threads/EventLoop-macOS.mm.o
+[112/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTP/HttpProtocol.cpp.o
+[113/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Messenger.cpp.o
+[114/154] Linking CXX static library _deps/eacp-build/Lib/eacp/Core/libeacp-core.a
+[115/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/CMakeSnippet.cpp.o
+[116/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Channel-Apple.cpp.o
+[117/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/OnlineResource/OnlineResources.cpp.o
+[118/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTP/Http.cpp.o
+[119/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Lock-Posix.cpp.o
+[120/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/WebSocket/WebSocket.cpp.o
+[121/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/WebSocket/Protocol.cpp.o
+[122/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/TCP/Connection-Posix.cpp.o
+[123/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTPServer/HttpServer.mm.o
+[124/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/IPC/Channel-Posix.cpp.o
+[125/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/OnlineResource/OnlineResource.cpp.o
+[126/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/Download.cpp.o
+[127/154] Building CXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/WebSocket/Server.cpp.o
+[128/154] Building CXX object tests/CMakeFiles/LockstepTests.dir/Sha256Tests.cpp.o
+[129/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/PackageCache.cpp.o
+[130/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/WebSocket/WebSocket.mm.o
+[131/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/Sha256.cpp.o
+[132/154] Building CXX object tests/CMakeFiles/LockstepTests.dir/PinnedReleaseTests.cpp.o
+[133/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/Git.cpp.o
+[134/154] Building OBJCXX object _deps/eacp-build/Lib/eacp/Network/CMakeFiles/eacp-network.dir/HTTP/Http.mm.o
+[135/154] Building CXX object tests/CMakeFiles/LockstepTests.dir/MerkleHashTests.cpp.o
+[136/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/MerkleHash.cpp.o
+[137/154] Building CXX object tests/CMakeFiles/LockstepTests.dir/__/_deps/miro-build/Lib/Miro-MiroResources-Generated/MiroResources_Register.cpp.o
+[138/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/PackageArguments.cpp.o
+[139/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/Session.cpp.o
+[140/154] Linking CXX static library _deps/eacp-build/Lib/eacp/Network/libeacp-network.a
+[141/154] Building CXX object tests/CMakeFiles/LockstepTests.dir/LockFileTests.cpp.o
+[142/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/LockFile.cpp.o
+[143/154] Building CXX object tests/CMakeFiles/LockstepTests.dir/PackageArgumentsTests.cpp.o
+[144/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/Commands.cpp.o
+[145/154] Building CXX object CMakeFiles/lockstep-lib.dir/src/PinnedRelease.cpp.o
+[146/154] Linking CXX static library liblockstep-lib.a
+[147/154] Embedding LockstepModule resources for lockstep
+[148/154] Building C object CMakeFiles/lockstep.dir/lockstep-LockstepModule-Generated/LockstepModule_0.c.o
+[149/154] Building CXX object CMakeFiles/lockstep.dir/_deps/miro-build/Lib/Miro-MiroResources-Generated/MiroResources_Register.cpp.o
+[150/154] Building CXX object CMakeFiles/lockstep.dir/lockstep-LockstepModule-Generated/LockstepModule_Register.cpp.o
+[151/154] Building CXX object CMakeFiles/lockstep.dir/lockstep-LockstepModule-Generated/LockstepModule.cpp.o
+[152/154] Linking CXX executable tests/LockstepTests
+[153/154] Building CXX object CMakeFiles/lockstep.dir/src/Main.cpp.o
+[154/154] Linking CXX executable lockstep
+ld: warning: ignoring duplicate libraries: '_deps/resembed-build/Lib/libResEmbed.a'
