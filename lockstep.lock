@@ -14,7 +14,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/cpp_data_structures.git"
+      "url": "https://github.com/eyalamirmusic/cpp_data_structures.git",
+      "usesGitLfs": false
     },
     {
       "commit": "1712e729e6c292f7e73abf817bf511f35dcffe4c",
@@ -29,7 +30,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/ESIMD.git"
+      "url": "https://github.com/eyalamirmusic/ESIMD.git",
+      "usesGitLfs": false
     },
     {
       "commit": "e6fc9b9acd899fbafc9431637a98198d484f6fd5",
@@ -44,7 +46,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/Miro.git"
+      "url": "https://github.com/eyalamirmusic/Miro.git",
+      "usesGitLfs": false
     },
     {
       "commit": "1b193ebc095338c967af3d658e74b0d6f870bf9b",
@@ -59,7 +62,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/NanoTest.git"
+      "url": "https://github.com/eyalamirmusic/NanoTest.git",
+      "usesGitLfs": false
     },
     {
       "commit": "8cfcbfa7bdf2214c8939502a349b7d4fb4ac73bb",
@@ -74,24 +78,26 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/ResEmbed.git"
+      "url": "https://github.com/eyalamirmusic/ResEmbed.git",
+      "usesGitLfs": false
     },
     {
-      "commit": "57b2ef604bd12d340d7c62873da74525611e9071",
-      "hash": "5145faa9673a3b0de9b6638eeed80a0105a5218d53c3ea4ab66a69e8026b7941",
+      "commit": "8476d5a5fbcb2075d6409efecedc7f19a13448d3",
+      "hash": "8577aa4a1b576d0069ca9fcbd91b0644f898ff262331ea3373125415e77353c7",
       "kind": "git",
       "name": "eacp",
       "patches": [],
-      "requestedRef": "57b2ef604bd12d340d7c62873da74525611e9071",
+      "requestedRef": "8476d5a5fbcb2075d6409efecedc7f19a13448d3",
       "submoduleSelection": {
         "isRecursive": true,
         "isRestricted": false,
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/eacp.git"
+      "url": "https://github.com/eyalamirmusic/eacp.git",
+      "usesGitLfs": false
     }
   ],
-  "root": "6eea5836c82799684d116372b7b2e28fd34515ee276a1488bd67aeffa2563c28",
+  "root": "423069be1089afea6adf8121fb0fd0d4e1e8891a3140eb06f9038d86fd362be8",
   "version": 1
 }

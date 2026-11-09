@@ -126,6 +126,27 @@ void fetchEveryBranchAndTag(const eacp::FilePath& mirror)
 
     runGitOrThrow(arguments);
 }
+// Sets the url from the last "<key>.url=" line whose "<key>.path=" is the path.
+void setUrlFromGitmodules(GitSubmodule& submodule,
+                          const eacp::Vector<std::string>& lines)
+{
+    for (const auto& line: lines)
+    {
+        auto equals = line.find('=');
+        auto key = std::string_view {line}.substr(0, equals);
+
+        if (!key.ends_with(".path") || line.substr(equals + 1) != submodule.path)
+            continue;
+
+        auto urlKey = std::string {removeSubmoduleKeySuffix(key)} + ".url=";
+
+        for (const auto& candidate: lines)
+        {
+            if (candidate.starts_with(urlKey))
+                submodule.url = candidate.substr(urlKey.size());
+        }
+    }
+}
 } // namespace
 
 std::optional<std::string>
@@ -312,22 +333,7 @@ std::vector<GitSubmodule> listSubmodules(const GitTreeListing& listing,
         auto submodule = GitSubmodule {gitlinkPath, {}, commit};
         auto lines = splitLines(settings);
 
-        for (const auto& line: lines)
-        {
-            auto equals = line.find('=');
-            auto key = std::string_view {line}.substr(0, equals);
-
-            if (!key.ends_with(".path") || line.substr(equals + 1) != gitlinkPath)
-                continue;
-
-            auto urlKey = std::string {removeSubmoduleKeySuffix(key)} + ".url=";
-
-            for (const auto& candidate: lines)
-            {
-                if (candidate.starts_with(urlKey))
-                    submodule.url = candidate.substr(urlKey.size());
-            }
-        }
+        setUrlFromGitmodules(submodule, lines);
 
         // A gitlink .gitmodules does not name is not a submodule git checks out.
         if (!submodule.url.empty())

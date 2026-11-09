@@ -5,7 +5,7 @@
 #include "MerkleHash.h"
 #include "Paths.h"
 #include "Messages.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
 #include "Status.h"
 
 #include <eacp/Core/Process/Process.h>
@@ -14,7 +14,6 @@
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/TemporaryFile.h>
 #include <eacp/Network/IPC/Lock.h>
-#include <eacp/Core/Utils/Strings.h>
 #include <eacp/Core/Utils/Zip.h>
 #include <eacp/Core/Platform/Platform.h>
 
@@ -30,7 +29,7 @@ constexpr auto urlKeyLength = 16;
 
 std::string computeUrlKey(const std::string& url)
 {
-    return computeSha256Hex(url).substr(0, urlKeyLength);
+    return eacp::computeSha256Hex(url).substr(0, urlKeyLength);
 }
 
 eacp::FilePath getStampPath(const eacp::FilePath& sourceDirectory)
@@ -227,15 +226,12 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
     {
         auto tree = staging / "tree";
         eacp::Files::createDirectories(tree);
-        auto resolvedCommit = std::string {};
-        auto submodules = std::vector<LockedSubmodule> {};
-        auto usesLfs = false;
+        auto checkout = GitCheckout {};
 
         if (request.kind == PackageKind::archive)
             fetchArchiveTree(request, network, tree);
         else
-            resolvedCommit =
-                fetchGitTree(request, commit, network, tree, submodules, usesLfs);
+            checkout = fetchGitTree(request, commit, network, tree);
 
         auto contentRoot = tree;
 
@@ -245,8 +241,9 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
         for (const auto& patch: request.patches)
             applyPatch(contentRoot, patch);
 
-        auto stored = storeTree(contentRoot, resolvedCommit, std::move(submodules));
-        stored.usesGitLfs = usesLfs;
+        auto stored = storeTree(
+            contentRoot, checkout.resolvedCommit, std::move(checkout.submodules));
+        stored.usesGitLfs = checkout.usesLfs;
         removeTreeAtAnyLength(staging);
         return stored;
     }
@@ -287,12 +284,10 @@ eacp::FilePath PackageCache::fetchCommitIntoMirror(const std::string& name,
     return mirror;
 }
 
-std::string PackageCache::fetchGitTree(const PackageRequest& request,
+GitCheckout PackageCache::fetchGitTree(const PackageRequest& request,
                                        const std::string& commit,
                                        Network network,
-                                       const eacp::FilePath& staging,
-                                       std::vector<LockedSubmodule>& submodules,
-                                       bool& usesLfs) const
+                                       const eacp::FilePath& staging) const
 {
     auto resolvedCommit = commit;
     auto mirror = eacp::FilePath {};
@@ -317,57 +312,49 @@ std::string PackageCache::fetchGitTree(const PackageRequest& request,
     }
 
     auto listing = listTree(mirror, resolvedCommit);
-    usesLfs = checkOutCommitWithLfs(listing, staging);
-    checkOutSubmodules(request.name,
-                       request.url,
-                       listing,
-                       staging,
-                       {},
+    auto checkout = GitCheckout {resolvedCommit};
+    checkout.usesLfs = checkOutCommitWithLfs(listing, staging);
+    checkOutSubmodules({request.name, request.url, listing, staging, {}},
                        request.submoduleSelection,
                        network,
-                       submodules,
-                       usesLfs);
-    return resolvedCommit;
+                       checkout);
+    return checkout;
 }
 
-void PackageCache::checkOutSubmodules(const std::string& name,
-                                      const std::string& parentUrl,
-                                      const GitTreeListing& parentListing,
-                                      const eacp::FilePath& tree,
-                                      const std::string& pathPrefix,
+void PackageCache::checkOutSubmodules(const SubmoduleParent& parent,
                                       const SubmoduleSelection& selection,
                                       Network network,
-                                      std::vector<LockedSubmodule>& submodules,
-                                      bool& usesLfs) const
+                                      GitCheckout& checkout) const
 {
-    for (const auto& submodule: listSubmodules(parentListing, tree))
+    for (const auto& submodule: listSubmodules(parent.listing, parent.tree))
     {
-        auto fullPath = pathPrefix + submodule.path;
+        auto fullPath = parent.pathPrefix + submodule.path;
         auto isSelected = !selection.isRestricted
                           || EA::Vectors::contains(selection.paths, fullPath);
 
         if (!isSelected)
             continue;
 
-        auto url = resolveSubmoduleUrl(parentUrl, submodule.url);
-        auto mirror = fetchCommitIntoMirror(name, url, submodule.commit, network);
-        auto destination = tree / submodule.path;
+        auto url = resolveSubmoduleUrl(parent.url, submodule.url);
+        auto mirror = fetchCommitIntoMirror(
+            parent.packageName, url, submodule.commit, network);
+        auto destination = parent.tree / submodule.path;
         eacp::Files::createDirectories(destination);
         auto submoduleListing = listTree(mirror, submodule.commit);
-        usesLfs = checkOutCommitWithLfs(submoduleListing, destination) || usesLfs;
-        submodules.push_back({fullPath, url, submodule.commit});
+        checkout.usesLfs =
+            checkOutCommitWithLfs(submoduleListing, destination) || checkout.usesLfs;
+        checkout.submodules.push_back({fullPath, url, submodule.commit});
 
         if (selection.isRecursive)
         {
-            checkOutSubmodules(name,
-                               url,
-                               submoduleListing,
-                               destination,
-                               fullPath + "/",
+            checkOutSubmodules({parent.packageName,
+                                url,
+                                submoduleListing,
+                                destination,
+                                fullPath + "/"},
                                {},
                                network,
-                               submodules,
-                               usesLfs);
+                               checkout);
         }
     }
 }

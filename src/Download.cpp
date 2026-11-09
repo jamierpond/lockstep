@@ -1,7 +1,7 @@
 #include "Download.h"
 #include "Messages.h"
 #include "Paths.h"
-#include "Sha256.h"
+#include "FileHash.h"
 
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Network/HTTP/Http.h>

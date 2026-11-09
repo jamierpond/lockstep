@@ -47,6 +47,22 @@ struct MaterializedPackage
 
 // The shared cache: bare git mirrors under git/, downloaded archives under
 // downloads/, and unpacked trees under src/<merkle hash>.
+struct GitCheckout
+{
+    std::string resolvedCommit;
+    std::vector<LockedSubmodule> submodules;
+    bool usesLfs = false;
+};
+
+struct SubmoduleParent
+{
+    std::string packageName;
+    std::string url;
+    const GitTreeListing& listing;
+    eacp::FilePath tree;
+    std::string pathPrefix;
+};
+
 class PackageCache
 {
 public:
@@ -74,25 +90,18 @@ private:
     eacp::FilePath getDownloadPath(const std::string& url) const;
     eacp::TemporaryFile createStagingDirectory() const;
 
-    std::string fetchGitTree(const PackageRequest& request,
+    GitCheckout fetchGitTree(const PackageRequest& request,
                              const std::string& commit,
                              Network network,
-                             const eacp::FilePath& staging,
-                             std::vector<LockedSubmodule>& submodules,
-                             bool& usesLfs) const;
+                             const eacp::FilePath& staging) const;
     eacp::FilePath fetchCommitIntoMirror(const std::string& name,
                                          const std::string& url,
                                          const std::string& commit,
                                          Network network) const;
-    void checkOutSubmodules(const std::string& name,
-                            const std::string& parentUrl,
-                            const GitTreeListing& parentListing,
-                            const eacp::FilePath& tree,
-                            const std::string& pathPrefix,
+    void checkOutSubmodules(const SubmoduleParent& parent,
                             const SubmoduleSelection& selection,
                             Network network,
-                            std::vector<LockedSubmodule>& submodules,
-                            bool& usesLfs) const;
+                            GitCheckout& checkout) const;
     void fetchArchiveTree(const PackageRequest& request,
                           Network network,
                           const eacp::FilePath& staging) const;

@@ -19,6 +19,37 @@ std::string removeLastComponent(std::string url)
 
     return url.substr(0, separator);
 }
+
+struct RelativeUrlWalk
+{
+    std::string base;
+    std::string_view rest;
+
+    bool hasRelativeStep() const
+    {
+        return rest.starts_with(parentPrefix) || rest.starts_with(currentPrefix);
+    }
+
+    void takeStep()
+    {
+        if (rest.starts_with(parentPrefix))
+        {
+            base = removeLastComponent(base);
+            rest.remove_prefix(parentPrefix.size());
+            return;
+        }
+
+        rest.remove_prefix(currentPrefix.size());
+    }
+
+    std::string join() const
+    {
+        if (!base.empty() && base.back() == ':')
+            return base + std::string {rest};
+
+        return base + "/" + std::string {rest};
+    }
+};
 } // namespace
 
 bool isSameSelection(const SubmoduleSelection& first,
@@ -36,38 +67,17 @@ bool isSameSubmodule(const LockedSubmodule& first, const LockedSubmodule& second
 
 std::string resolveSubmoduleUrl(const std::string& parentUrl, const std::string& url)
 {
-    if (!url.starts_with(parentPrefix) && !url.starts_with(currentPrefix))
+    auto walk = RelativeUrlWalk {parentUrl, url};
+
+    if (!walk.hasRelativeStep())
         return url;
 
-    auto base = parentUrl;
+    while (!walk.base.empty() && walk.base.back() == '/')
+        walk.base.pop_back();
 
-    while (!base.empty() && base.back() == '/')
-        base.pop_back();
+    while (walk.hasRelativeStep())
+        walk.takeStep();
 
-    auto rest = std::string_view {url};
-
-    while (true)
-    {
-        if (rest.starts_with(parentPrefix))
-        {
-            base = removeLastComponent(base);
-            rest.remove_prefix(parentPrefix.size());
-        }
-        else if (rest.starts_with(currentPrefix))
-        {
-            rest.remove_prefix(currentPrefix.size());
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    auto separator = std::string {"/"};
-
-    if (!base.empty() && base.back() == ':')
-        separator.clear();
-
-    return base + separator + std::string {rest};
+    return walk.join();
 }
 } // namespace lockstep

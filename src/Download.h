@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Sha256.h"
+#include "FileHash.h"
 
 #include <eacp/Core/Utils/FilePath.h>
 
@@ -22,7 +22,7 @@ struct ExpectedHash
     std::string algorithm = "SHA256";
     std::string hex;
     std::function<std::string(const eacp::FilePath&)> computeHex =
-        [](const eacp::FilePath& file) { return computeFileSha256Hex(file); };
+        [](const eacp::FilePath& file) { return computeFileSha256HexOrThrow(file); };
 };
 
 // Downloads `url` to a .part sibling of `destination` and moves it into place

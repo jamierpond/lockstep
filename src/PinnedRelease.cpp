@@ -1,7 +1,7 @@
 #include "PinnedRelease.h"
 #include "Download.h"
 #include "LockFile.h"
-#include "Sha256.h"
+#include "FileHash.h"
 
 #include <eacp/Core/Platform/Platform.h>
 #include <eacp/Core/Utils/Files.h>
@@ -128,7 +128,7 @@ eacp::FilePath fetchPinnedExecutable(const PinnedRelease& release,
         makeExecutable(executable);
     }
 
-    auto actualHash = computeFileSha256Hex(executable);
+    auto actualHash = computeFileSha256HexOrThrow(executable);
 
     if (actualHash != release.sha256)
     {

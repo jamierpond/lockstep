@@ -18,13 +18,14 @@ set(EACP_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(EACP_BUILD_SPIRV OFF CACHE BOOL "" FORCE)
 
 lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp
-        GIT_TAG 57b2ef604bd12d340d7c62873da74525611e9071 EXCLUDE_FROM_ALL)
+        GIT_TAG 8476d5a5fbcb2075d6409efecedc7f19a13448d3 EXCLUDE_FROM_ALL)
 
 add_library(lockstep-lib STATIC
         src/CMakeSnippet.cpp
         src/Commands.cpp
         src/Messages.cpp
         src/Download.cpp
+        src/FileHash.cpp
         src/Git.cpp
         src/LockFile.cpp
         src/LongPath.cpp
@@ -34,8 +35,7 @@ add_library(lockstep-lib STATIC
         src/PinnedRelease.cpp
         src/Session.cpp
         src/Status.cpp
-        src/Submodules.cpp
-        src/Sha256.cpp)
+        src/Submodules.cpp)
 
 target_include_directories(lockstep-lib PUBLIC src)
 target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)

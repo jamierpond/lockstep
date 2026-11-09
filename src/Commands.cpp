@@ -268,17 +268,36 @@ std::string describeRequest(const std::string& url,
     return eacp::Strings::format("at '{}'", ref);
 }
 
+bool isSameSource(const PackageSpec& spec, const LockedPackage& locked)
+{
+    auto isSameUrlAndRef = locked.url == spec.url && locked.requestedRef == spec.ref;
+    return isSameUrlAndRef && locked.kind == spec.kind;
+}
+
+void describeSameSourceMismatch(LockMismatch& mismatch, bool isSamePatches)
+{
+    if (!isSamePatches)
+    {
+        mismatch.requestedDescription = "with other patches";
+        mismatch.lockedDescription = "with the patches it records";
+        return;
+    }
+
+    mismatch.requestedDescription = "with other submodules";
+    mismatch.lockedDescription = "with the submodules it records";
+}
+
 void checkRequestMatchesLock(const CommandOptions& options,
                              const PackageSpec& spec,
                              const LockedPackage& locked)
 {
-    auto isSameSource = locked.url == spec.url && locked.requestedRef == spec.ref
-                        && locked.kind == spec.kind;
+    auto hasSameSource = isSameSource(spec, locked);
     auto isSamePatches = locked.patches == getPatchesForLock(options, spec);
     auto isSameSubmodules =
         isSameSelection(locked.submoduleSelection, spec.submoduleSelection);
+    auto isSameContent = isSamePatches && isSameSubmodules;
 
-    if (isSameSource && isSamePatches && isSameSubmodules)
+    if (hasSameSource && isSameContent)
         return;
 
     auto mismatch =
@@ -289,16 +308,8 @@ void checkRequestMatchesLock(const CommandOptions& options,
                       describeRequest(locked.url, locked.requestedRef, spec.url),
                       getPathForUser(options, options.buildDirectory)};
 
-    if (isSameSource && !isSamePatches)
-    {
-        mismatch.requestedDescription = "with other patches";
-        mismatch.lockedDescription = "with the patches it records";
-    }
-    else if (isSameSource)
-    {
-        mismatch.requestedDescription = "with other submodules";
-        mismatch.lockedDescription = "with the submodules it records";
-    }
+    if (hasSameSource)
+        describeSameSourceMismatch(mismatch, isSamePatches);
 
     throw std::runtime_error(describeLockMismatch(mismatch));
 }
@@ -360,6 +371,18 @@ std::string getCheckoutStamp(const eacp::FilePath& checkout, const std::string& 
     return hash + " " + computeTreeStamp(checkout);
 }
 
+bool isCheckoutCurrent(const eacp::FilePath& checkout,
+                       const eacp::FilePath& stampPath,
+                       const eacp::FilePath& cached)
+{
+    auto hash = cached.fileName();
+
+    if (!eacp::Files::isFile(stampPath) || !eacp::Files::isDirectory(checkout))
+        return false;
+
+    return eacp::Files::readFile(stampPath) == getCheckoutStamp(checkout, hash);
+}
+
 // SOURCE_DIR beside a repository or URL: the locked tree is copied there, and
 // copied again whenever the stamp kept in the build directory stops matching.
 eacp::FilePath placeCheckout(const CommandOptions& options,
@@ -372,8 +395,7 @@ eacp::FilePath placeCheckout(const CommandOptions& options,
         options.buildDirectory / "_lockstep" / "checkouts" / (spec.name + ".stamp");
     auto hash = cached.fileName();
 
-    if (eacp::Files::isFile(stampPath) && eacp::Files::isDirectory(checkout)
-        && eacp::Files::readFile(stampPath) == getCheckoutStamp(checkout, hash))
+    if (isCheckoutCurrent(checkout, stampPath, cached))
         return checkout;
 
     printStatus("checking out " + spec.name + " into " + checkout.str());
@@ -593,9 +615,12 @@ SessionOverride parseOverride(const std::string& definition)
 
     for (auto prefix: overridePrefixes)
     {
-        if (equals == std::string::npos
-            || variable.size() <= prefix.size() + overrideSuffix.size()
-            || !variable.starts_with(prefix) || !variable.ends_with(overrideSuffix))
+        auto minimumLength = prefix.size() + overrideSuffix.size();
+        auto hasAffixes =
+            variable.starts_with(prefix) && variable.ends_with(overrideSuffix);
+        auto isNameBetweenAffixes = variable.size() > minimumLength && hasAffixes;
+
+        if (equals == std::string::npos || !isNameBetweenAffixes)
             continue;
 
         auto nameLength = variable.size() - prefix.size() - overrideSuffix.size();
@@ -685,25 +710,30 @@ int runProvideCommand(const CommandOptions& options)
     return 0;
 }
 
+void checkUpdateNamesAreLocked(const CommandOptions& options, const LockFile& lock)
+{
+    for (const auto& name: options.names)
+    {
+        if (lock.findPackage(name))
+            continue;
+
+        auto lockedNames = eacp::Vector<std::string> {};
+
+        for (const auto& package: lock.packages)
+            lockedNames.add(package.name);
+
+        throw std::runtime_error(describeUnknownUpdateName(
+            {name, getPathForUser(options, options.lock), lockedNames}));
+    }
+}
+
 int runUpdateCommand(const CommandOptions& options)
 {
     auto cache = createPackageCache(options);
     auto lock = readLockFile(options.lock);
     auto updatedCount = 0;
 
-    for (const auto& name: options.names)
-    {
-        if (!lock.findPackage(name))
-        {
-            auto lockedNames = eacp::Vector<std::string> {};
-
-            for (const auto& package: lock.packages)
-                lockedNames.add(package.name);
-
-            throw std::runtime_error(describeUnknownUpdateName(
-                {name, getPathForUser(options, options.lock), lockedNames}));
-        }
-    }
+    checkUpdateNamesAreLocked(options, lock);
 
     for (const auto& package: lock.packages)
     {

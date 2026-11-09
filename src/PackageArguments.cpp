@@ -248,87 +248,165 @@ struct KeywordValues
     }
 };
 
+class ArgumentReader
+{
+public:
+    explicit ArgumentReader(const std::vector<std::string>& argumentsToRead)
+        : arguments(argumentsToRead)
+    {
+    }
+
+    bool hasNext() const { return index < arguments.size(); }
+
+    const std::string& peekNext() const { return arguments[index]; }
+
+    const std::string& takeNext() { return arguments[index++]; }
+
+private:
+    const std::vector<std::string>& arguments;
+    std::size_t index = 0;
+};
+
+KeywordRule findAllowedKeywordRule(const std::string& keyword)
+{
+    auto rule = findKeywordRule(keyword);
+
+    if (!rule)
+    {
+        throw std::invalid_argument("lockstep does not know the option '" + keyword
+                                    + "'");
+    }
+
+    if (rule->group == KeywordGroup::refused)
+        throw std::invalid_argument(keyword + " "
+                                    + std::string {rule->refusalReason});
+
+    return *rule;
+}
+
+void readFlag(ArgumentReader& reader,
+              const std::string& keyword,
+              KeywordValues& collected)
+{
+    auto isSet = true;
+
+    if (reader.hasNext() && isCMakeBoolean(reader.peekNext()))
+        isSet = !isCMakeFalse(reader.takeNext());
+
+    collected.flags.emplace(keyword, isSet);
+}
+
+void readValue(ArgumentReader& reader,
+               const std::string& keyword,
+               KeywordValues& collected)
+{
+    if (!reader.hasNext())
+        throw std::invalid_argument(keyword + " needs a value");
+
+    collected.values.emplace(keyword, reader.takeNext());
+}
+
+std::vector<std::string> readList(ArgumentReader& reader)
+{
+    auto list = std::vector<std::string> {};
+
+    while (reader.hasNext() && !isKeyword(reader.peekNext()))
+        list.push_back(reader.takeNext());
+
+    return list;
+}
+
+void readKeyword(ArgumentReader& reader,
+                 const KeywordRule& rule,
+                 const std::string& keyword,
+                 KeywordValues& collected)
+{
+    switch (rule.group)
+    {
+        case KeywordGroup::flag:
+            readFlag(reader, keyword, collected);
+            return;
+        case KeywordGroup::value:
+            readValue(reader, keyword, collected);
+            return;
+        case KeywordGroup::list:
+            collected.lists.emplace(keyword, readList(reader));
+            return;
+        case KeywordGroup::ignored:
+        case KeywordGroup::refused:
+            readList(reader);
+            return;
+    }
+}
+
 KeywordValues collectKeywordValues(const std::vector<std::string>& arguments)
 {
     auto collected = KeywordValues {};
-    auto index = std::size_t {0};
+    auto reader = ArgumentReader {arguments};
 
-    while (index < arguments.size())
+    while (reader.hasNext())
     {
-        const auto& keyword = arguments[index++];
-        auto rule = findKeywordRule(keyword);
-
-        if (!rule)
-        {
-            throw std::invalid_argument("lockstep does not know the option '"
-                                        + keyword + "'");
-        }
-
-        if (rule->group == KeywordGroup::refused)
-            throw std::invalid_argument(keyword + " "
-                                        + std::string {rule->refusalReason});
-
-        if (rule->group == KeywordGroup::flag)
-        {
-            auto isSet = true;
-
-            if (index < arguments.size() && isCMakeBoolean(arguments[index]))
-                isSet = !isCMakeFalse(arguments[index++]);
-
-            collected.flags.emplace(keyword, isSet);
-        }
-        else if (rule->group == KeywordGroup::value)
-        {
-            if (index >= arguments.size())
-                throw std::invalid_argument(keyword + " needs a value");
-
-            collected.values.emplace(keyword, arguments[index++]);
-        }
-        else
-        {
-            auto list = std::vector<std::string> {};
-
-            while (index < arguments.size() && !isKeyword(arguments[index]))
-                list.push_back(arguments[index++]);
-
-            if (rule->group == KeywordGroup::list)
-                collected.lists.emplace(keyword, list);
-        }
+        const auto& keyword = reader.takeNext();
+        readKeyword(reader, findAllowedKeywordRule(keyword), keyword, collected);
     }
 
     return collected;
 }
 
+std::string takeShorthandTag(std::string& text)
+{
+    auto hash = text.rfind('#');
+
+    if (hash == std::string::npos)
+        return {};
+
+    auto tag = text.substr(hash + 1);
+    text.resize(hash);
+    return tag;
+}
+
+bool isShorthandVersionSeparator(const std::string& text, std::size_t at)
+{
+    if (at == std::string::npos || at == 0)
+        return false;
+
+    return text.find('/', at) == std::string::npos && text[at - 1] != ':';
+}
+
+std::string takeShorthandVersion(std::string& text)
+{
+    auto at = text.rfind('@');
+
+    if (!isShorthandVersionSeparator(text, at))
+        return {};
+
+    auto version = text.substr(at + 1);
+    text.resize(at);
+    return version;
+}
+
+std::vector<std::string> expandShorthandSource(const std::string& text)
+{
+    if (text.starts_with(githubPrefix))
+        return {"GITHUB_REPOSITORY", text.substr(githubPrefix.size())};
+
+    if (text.starts_with(gitlabPrefix))
+        return {"GITLAB_REPOSITORY", text.substr(gitlabPrefix.size())};
+
+    if (text.starts_with(bitbucketPrefix))
+        return {"BITBUCKET_REPOSITORY", text.substr(bitbucketPrefix.size())};
+
+    if (isArchiveUrl(text))
+        return {"URL", text};
+
+    return {"GIT_REPOSITORY", text};
+}
+
 std::vector<std::string> expandShorthand(std::string text)
 {
-    auto expanded = std::vector<std::string> {};
-    auto tag = std::string {};
-    auto version = std::string {};
-
-    if (auto hash = text.rfind('#'); hash != std::string::npos)
-    {
-        tag = text.substr(hash + 1);
-        text.resize(hash);
-    }
-
-    if (auto at = text.rfind('@'); at != std::string::npos && at > 0
-                                   && text.find('/', at) == std::string::npos
-                                   && text[at - 1] != ':')
-    {
-        version = text.substr(at + 1);
-        text.resize(at);
-    }
-
-    if (text.starts_with(githubPrefix))
-        expanded = {"GITHUB_REPOSITORY", text.substr(githubPrefix.size())};
-    else if (text.starts_with(gitlabPrefix))
-        expanded = {"GITLAB_REPOSITORY", text.substr(gitlabPrefix.size())};
-    else if (text.starts_with(bitbucketPrefix))
-        expanded = {"BITBUCKET_REPOSITORY", text.substr(bitbucketPrefix.size())};
-    else if (isArchiveUrl(text))
-        expanded = {"URL", text};
-    else
-        expanded = {"GIT_REPOSITORY", text};
+    auto tag = takeShorthandTag(text);
+    auto version = takeShorthandVersion(text);
+    auto expanded = expandShorthandSource(text);
 
     if (!version.empty())
         expanded.insert(expanded.end(), {"VERSION", version});
@@ -435,6 +513,49 @@ void setSourceFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
 
     spec.checkoutDirectory = keywords.findValue("SOURCE_DIR").value_or("");
 }
+
+void setNameFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
+{
+    spec.name = keywords.findValue("NAME").value_or("");
+
+    if (spec.name.empty() && spec.kind != PackageKind::local)
+        spec.name = getPackageNameFromUrl(spec.url);
+
+    if (spec.name.empty())
+        throw std::invalid_argument("a SOURCE_DIR package needs a NAME");
+}
+
+void setRefFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
+{
+    spec.ref = keywords.findValue("GIT_TAG").value_or("");
+
+    if (spec.kind != PackageKind::git || !spec.ref.empty())
+        return;
+
+    auto version = keywords.findValue("VERSION");
+
+    if (!version)
+        throw std::invalid_argument(spec.name + " needs a GIT_TAG or a VERSION");
+
+    spec.ref = "v" + *version;
+}
+
+void setSubmodulesFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
+{
+    spec.submoduleSelection.isRestricted = keywords.hasList("GIT_SUBMODULES");
+    spec.submoduleSelection.paths = keywords.findList("GIT_SUBMODULES");
+
+    if (auto recurse = keywords.findValue("GIT_SUBMODULES_RECURSE"))
+        spec.submoduleSelection.isRecursive = !isCMakeFalse(*recurse);
+}
+
+void setArchiveHashFromKeywords(PackageSpec& spec, const KeywordValues& keywords)
+{
+    if (auto urlHash = keywords.findValue("URL_HASH"))
+        spec.archiveHash = parseUrlHash(*urlHash);
+    else if (auto md5 = keywords.findValue("URL_MD5"))
+        spec.archiveHash = parseUrlHash("MD5=" + *md5);
+}
 } // namespace
 
 std::vector<std::string_view> listIgnoredKeywords()
@@ -492,26 +613,8 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
     auto spec = PackageSpec {};
 
     setSourceFromKeywords(spec, keywords);
-
-    spec.name = keywords.findValue("NAME").value_or("");
-
-    if (spec.name.empty() && spec.kind != PackageKind::local)
-        spec.name = getPackageNameFromUrl(spec.url);
-
-    if (spec.name.empty())
-        throw std::invalid_argument("a SOURCE_DIR package needs a NAME");
-
-    spec.ref = keywords.findValue("GIT_TAG").value_or("");
-
-    if (spec.kind == PackageKind::git && spec.ref.empty())
-    {
-        auto version = keywords.findValue("VERSION");
-
-        if (!version)
-            throw std::invalid_argument(spec.name + " needs a GIT_TAG or a VERSION");
-
-        spec.ref = "v" + *version;
-    }
+    setNameFromKeywords(spec, keywords);
+    setRefFromKeywords(spec, keywords);
 
     for (const auto& option: keywords.findList("OPTIONS"))
         spec.options.push_back(splitOption(option));
@@ -521,17 +624,8 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
     spec.isDownloadOnly = keywords.isFlagSet("DOWNLOAD_ONLY");
     spec.isExcludedFromAll = keywords.isFlagSet("EXCLUDE_FROM_ALL");
     spec.isSystem = keywords.isFlagSet("SYSTEM");
-    spec.submoduleSelection.isRestricted = keywords.hasList("GIT_SUBMODULES");
-    spec.submoduleSelection.paths = keywords.findList("GIT_SUBMODULES");
-
-    if (auto recurse = keywords.findValue("GIT_SUBMODULES_RECURSE"))
-        spec.submoduleSelection.isRecursive = !isCMakeFalse(*recurse);
-
-    if (auto urlHash = keywords.findValue("URL_HASH"))
-        spec.archiveHash = parseUrlHash(*urlHash);
-    else if (auto md5 = keywords.findValue("URL_MD5"))
-        spec.archiveHash = parseUrlHash("MD5=" + *md5);
-
+    setSubmodulesFromKeywords(spec, keywords);
+    setArchiveHashFromKeywords(spec, keywords);
     return spec;
 }
 } // namespace lockstep

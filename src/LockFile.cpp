@@ -1,5 +1,6 @@
 #include "LockFile.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
+#include <eacp/Core/Utils/Strings.h>
 
 #include <eacp/Core/Utils/Files.h>
 #include <ea_data_structures/Utilities/VectorUtilities.h>
@@ -46,12 +47,13 @@ std::string LockFile::computeRootHash() const
     auto sorted = packages;
     EA::Vectors::sort(sorted, isOrderedByName);
 
-    auto hasher = Sha256 {};
+    auto hasher = eacp::Sha256 {};
 
     for (const auto& package: sorted)
         hasher.update(package.name + ' ' + package.hash + '\n');
 
-    return convertDigestToHex(hasher.finish());
+    auto digest = hasher.finish();
+    return eacp::Strings::toHex(digest);
 }
 
 LockFile readLockFile(const eacp::FilePath& path)
