@@ -3,7 +3,7 @@
 # It downloads the pinned lockstep binary and includes the CMake module it writes.
 cmake_minimum_required(VERSION 3.25)
 
-set(LOCKSTEP_VERSION 0.4.1)
+set(LOCKSTEP_VERSION 0.4.3)
 set(LOCKSTEP_RELEASE_URL https://github.com/jamierpond/lockstep/releases/download)
 set(LOCKSTEP_SHA256_macos-arm64 "e3b4b34a49686acd4cae97ad896e5c284dbf530d5d025746ea19ee3b8ef7d10d")
 set(LOCKSTEP_SHA256_macos-x64 "e3b4b34a49686acd4cae97ad896e5c284dbf530d5d025746ea19ee3b8ef7d10d")
