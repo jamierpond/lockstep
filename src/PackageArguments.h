@@ -32,7 +32,7 @@ struct PackageSpec
     SubmoduleSelection submoduleSelection;
     ArchiveHash archiveHash;
     bool isDownloadOnly = false;
-    bool isExcludedFromAll = false;
+    bool isExcludedFromAll = true;
     bool isSystem = false;
 };
 

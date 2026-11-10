@@ -241,10 +241,17 @@ struct KeywordValues
 
     bool hasList(std::string_view keyword) const { return lists.contains(keyword); }
 
+    std::optional<bool> findFlag(std::string_view keyword) const
+    {
+        if (auto found = flags.find(keyword); found != flags.end())
+            return found->second;
+
+        return std::nullopt;
+    }
+
     bool isFlagSet(std::string_view keyword) const
     {
-        auto found = flags.find(keyword);
-        return found != flags.end() && found->second;
+        return findFlag(keyword).value_or(false);
     }
 };
 
@@ -519,7 +526,8 @@ PackageSpec parsePackageArguments(const std::vector<std::string>& arguments)
     spec.patches = keywords.findList("PATCHES");
     spec.sourceSubdirectory = keywords.findValue("SOURCE_SUBDIR").value_or("");
     spec.isDownloadOnly = keywords.isFlagSet("DOWNLOAD_ONLY");
-    spec.isExcludedFromAll = keywords.isFlagSet("EXCLUDE_FROM_ALL");
+    spec.isExcludedFromAll =
+        keywords.findFlag("EXCLUDE_FROM_ALL").value_or(spec.isExcludedFromAll);
     spec.isSystem = keywords.isFlagSet("SYSTEM");
     spec.submoduleSelection.isRestricted = keywords.hasList("GIT_SUBMODULES");
     spec.submoduleSelection.paths = keywords.findList("GIT_SUBMODULES");

@@ -212,6 +212,18 @@ std::vector<std::string> withGitSource(std::vector<std::string> extra)
 using PackageArgumentsTests::isRejected;
 using PackageArgumentsTests::withGitSource;
 
+auto tExcludedFromAllByDefault =
+    test("Arguments/excludedFromAllUnlessTheCallSaysNo") = []
+{
+    check(parsePackageArguments(withGitSource({})).isExcludedFromAll);
+    check(parsePackageArguments(withGitSource({"EXCLUDE_FROM_ALL"}))
+              .isExcludedFromAll);
+    check(!parsePackageArguments(withGitSource({"EXCLUDE_FROM_ALL", "NO"}))
+               .isExcludedFromAll);
+    check(!parsePackageArguments(withGitSource({"EXCLUDE_FROM_ALL", "OFF"}))
+               .isExcludedFromAll);
+};
+
 auto tSubmodulesDefault = test("Arguments/submodulesDefaultToAllRecursive") = []
 {
     auto spec = parsePackageArguments(withGitSource({}));

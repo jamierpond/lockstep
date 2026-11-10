@@ -31,6 +31,14 @@ add_test(NAME Consumer/submodules
         -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
         -P ${CMAKE_CURRENT_SOURCE_DIR}/RunSubmoduleProject.cmake)
 
+add_test(NAME Consumer/excludeFromAll
+        COMMAND ${CMAKE_COMMAND}
+        -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/exclude-from-all
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-exclude-from-all
+        -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+        -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/RunExcludeFromAllProject.cmake)
+
 add_test(NAME Consumer/git-edge-cases
         COMMAND ${CMAKE_COMMAND}
         -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/git-edge-cases

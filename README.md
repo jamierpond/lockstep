@@ -125,6 +125,16 @@ and change nothing, since lockstep fetches exact commits into a cache keyed by
 content. It sets `<Name>_SOURCE_DIR`,
 `<Name>_BINARY_DIR` and `<Name>_ADDED`, as CPM does.
 
+A package's targets are left out of `all`, unlike CPM and FetchContent: a plain
+`cmake --build` compiles only the targets your project builds and what they
+link, and `cmake --install` skips the package's own `install()` rules. To build
+and install everything a package declares, pass `EXCLUDE_FROM_ALL NO`:
+
+```cmake
+lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp GIT_TAG main
+        EXCLUDE_FROM_ALL NO)
+```
+
 | Variable | Effect |
 | --- | --- |
 | `LOCKSTEP_MODE` | `locked` (default), `update` (re-resolve every ref and rewrite the lock) or `offline` (use the cache only, never the network) |
