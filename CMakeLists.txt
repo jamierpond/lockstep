@@ -4,8 +4,6 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0 CACHE STRING
         "Oldest macOS lockstep runs on; eacp-core links UniformTypeIdentifiers, which is 11.0+")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-set(LOCKSTEP_LIBRARY_CACHE ON CACHE BOOL
-        "Link each locked package's static libraries from lockstep's shared library cache when an earlier build compiled them from the same inputs, instead of compiling them again")
 set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES ${CMAKE_CURRENT_LIST_DIR}/cmake/lockstep.cmake)
 
 project(lockstep VERSION 0.7.0 LANGUAGES C CXX)
