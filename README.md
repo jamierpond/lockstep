@@ -707,7 +707,7 @@ instead.
 ```bash
 just test                 # configure, build and run every test
 just install              # cmake --install into ~/.local (just install <prefix>)
-just fmt                  # clang-format over src and tests
+just format               # clang-format every tracked source (just fmt also works)
 just clean
 ```
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.31)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0 CACHE STRING
         "Oldest macOS lockstep runs on; eacp-core links UniformTypeIdentifiers, which is 11.0+")
@@ -12,6 +12,9 @@ project(lockstep VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# No source this project compiles uses C++20 modules, so scanning each one for them is wasted work.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(EACP_BUILD_GRAPHICS OFF CACHE BOOL "" FORCE)
 set(EACP_BUILD_WEBVIEW OFF CACHE BOOL "" FORCE)
