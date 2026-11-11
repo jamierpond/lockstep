@@ -142,6 +142,9 @@ if (NOT warning_count EQUAL 1)
     message(FATAL_ERROR "an unreachable host gave ${warning_count} warnings, not 1")
 endif ()
 build_and_run(build-unreachable)
+# The link starts a send that archives the library from inside the cache, and
+# Windows cannot delete a directory a running process works in.
+wait_for_file("${WORK_DIR}/build-unreachable/_lockstep/library-cache/send-failure.txt")
 
 # A location that is a file cannot hold libraries, so the send after the link fails.
 file(WRITE "${WORK_DIR}/location-file" "not a directory")
