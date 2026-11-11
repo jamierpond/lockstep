@@ -1,7 +1,7 @@
 lockstep_add_package(NAME NanoTest GITHUB eyalamirmusic/NanoTest GIT_TAG main)
 
 nano_add_executable(LockstepTests
-        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp
+        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp ExecutableCacheTests.cpp
         TARGETS lockstep-lib
         NO_MAIN)
 target_compile_definitions(LockstepTests PRIVATE
@@ -96,10 +96,37 @@ if (NOT is_multi_config)
 
     add_library_cache_location_test(libraryCacheLocation)
 
+    # A second generator for the same build: one that can build a single
+    # configuration and that this machine has the make program of.
+    set(other_generator)
+    find_program(LOCKSTEP_TESTS_MAKE NAMES make gmake)
+    find_program(LOCKSTEP_TESTS_NMAKE NAMES nmake)
+    if (WIN32 AND LOCKSTEP_TESTS_NMAKE)
+        set(other_generator "NMake Makefiles")
+    elseif (NOT WIN32 AND LOCKSTEP_TESTS_MAKE)
+        set(other_generator "Unix Makefiles")
+    endif ()
+
+    function(add_library_cache_tools_test name)
+        add_test(NAME Consumer/${name}
+                COMMAND ${CMAKE_COMMAND}
+                -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/library-cache-tools
+                -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-${name}
+                -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+                -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+                "-DGENERATOR=${CMAKE_GENERATOR}"
+                "-DOTHER_GENERATOR=${other_generator}"
+                ${ARGN}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/RunLibraryCacheToolsProject.cmake)
+    endfunction()
+
+    add_library_cache_tools_test(libraryCacheTools)
+
     # Reported as skipped where `ssh -o BatchMode=yes <host> true` fails.
     set(LOCKSTEP_TESTS_SSH_HOST localhost CACHE STRING
             "The host Consumer/libraryCacheOverSsh keeps a library cache location on")
     add_library_cache_location_test(libraryCacheOverSsh "-DSSH_HOST=${LOCKSTEP_TESTS_SSH_HOST}")
-    set_tests_properties(Consumer/libraryCacheOverSsh PROPERTIES
+    add_library_cache_tools_test(libraryCacheToolsOverSsh "-DSSH_HOST=${LOCKSTEP_TESTS_SSH_HOST}")
+    set_tests_properties(Consumer/libraryCacheOverSsh Consumer/libraryCacheToolsOverSsh PROPERTIES
             SKIP_REGULAR_EXPRESSION "lockstep-test-skipped")
 endif ()

@@ -5,6 +5,7 @@
 
 #include <LibraryCache.h>
 #include <LibraryCacheLocation.h>
+#include <LibraryCachePlan.h>
 #include <LibraryStore.h>
 #include <Sha256.h>
 
@@ -188,6 +189,44 @@ std::string computeKey(const SampleBuild& build)
     auto inputs = lockstep::LibraryCacheInputs {
         description, packages, names, {build.buildDirectory, build.cacheDirectory}};
     return lockstep::computeLibraryKey(inputs, "greeter").key;
+}
+
+bool storeLibrary(const lockstep::LibraryStore& store,
+                  const std::string& key,
+                  const eacp::FilePath& library,
+                  const std::string& inputs)
+{
+    return store.storeEntry(
+        key, {lockstep::CachedTargetKind::staticLibrary, {library}, inputs});
+}
+
+std::optional<eacp::FilePath> findLibrary(const lockstep::LibraryStore& store,
+                                          const std::string& key)
+{
+    auto entry = store.findEntry(key);
+
+    if (!entry)
+        return std::nullopt;
+
+    return entry->getFilePaths().front();
+}
+
+lockstep::LibraryCacheStatistics
+    countStaticLibraries(const lockstep::LibraryCacheCounts& counts)
+{
+    auto statistics = lockstep::LibraryCacheStatistics {};
+    statistics.staticLibraries = counts;
+    return statistics;
+}
+
+int countStoredLibraries(const lockstep::LibraryStoreSummary& summary)
+{
+    auto found = summary.entryCounts.find(lockstep::CachedTargetKind::staticLibrary);
+
+    if (found == summary.entryCounts.end())
+        return 0;
+
+    return found->second;
 }
 
 std::optional<std::string> findReason(const std::string& records)
@@ -436,10 +475,20 @@ auto tSkipsLocal = test("LibraryCache/skipsLinkToTargetOutsideCachedPackages") =
 auto tSkipsObjects = test("LibraryCache/skipsTargetUsedThroughTargetObjects") = []
 {
     auto reason =
-        findReason("target\tgreeter\tSOURCE_DIR\t/cache/src/1111\n"
+        findReason("target\tgreeter\tTYPE\tSTATIC_LIBRARY\n"
+                   "target\tgreeter\tSOURCE_DIR\t/cache/src/1111\n"
                    "target\tgreeter\tSTUB_LANGUAGE\tCXX\n"
                    "target\tapp\tSOURCES\tmain.cpp;$<TARGET_OBJECTS:greeter>\n");
     check(reason.has_value() && reason->find("TARGET_OBJECTS") != std::string::npos);
+};
+
+auto tCachesObjectLibrary =
+    test("LibraryCache/cachesObjectLibraryUsedThroughTargetObjects") = []
+{
+    check(!findReason("target\tgreeter\tTYPE\tOBJECT_LIBRARY\n"
+                      "target\tgreeter\tSOURCE_DIR\t/cache/src/1111\n"
+                      "target\tgreeter\tSTUB_LANGUAGE\tCXX\n"
+                      "target\tapp\tSOURCES\tmain.cpp;$<TARGET_OBJECTS:greeter>\n"));
 };
 
 auto tSkipsSeparateProgramDatabase =
@@ -551,14 +600,53 @@ auto tStoreRoundTrip = test("LibraryStore/storesAndFindsLibrary") = []
     writeTestFile(library, "first");
     auto store = lockstep::LibraryStore {directory / "cache"};
 
-    check(!store.findLibrary("key"));
-    check(store.storeLibrary("key", library, "inputs"));
+    check(!findLibrary(store, "key"));
+    check(storeLibrary(store, "key", library, "inputs"));
     writeTestFile(library, "second");
-    check(!store.storeLibrary("key", library, "inputs"));
+    check(!storeLibrary(store, "key", library, "inputs"));
 
-    auto found = store.findLibrary("key");
+    auto found = findLibrary(store, "key");
     check(found.has_value() && found->fileName() == "libgreeter.a");
     check(found && eacp::Files::readFile(*found) == "first");
+};
+
+auto tStoreObjects = test("LibraryStore/storesObjectFilesInTheirOrder") = []
+{
+    auto directory = createEmptyTestDirectory("library-store-objects");
+    auto first = directory / "build" / "first" / "unity.cpp.o";
+    auto second = directory / "build" / "second" / "unity.cpp.o";
+    writeTestFile(first, "first object");
+    writeTestFile(second, "second object");
+    auto store = lockstep::LibraryStore {directory / "cache"};
+
+    check(store.storeEntry(
+        sampleKey,
+        {lockstep::CachedTargetKind::objectLibrary, {first, second}, "inputs"}));
+
+    auto entry = store.findEntry(sampleKey);
+    check(entry.has_value());
+    auto files = entry->getFilePaths();
+    check(files.size() == 2);
+    check(eacp::Files::readFile(files[0]) == "first object");
+    check(eacp::Files::readFile(files[1]) == "second object");
+    check(store.summarize().entryCounts.at(lockstep::CachedTargetKind::objectLibrary)
+          == 1);
+};
+
+auto tEntryKind = test("LibraryCachePlan/findsEntryOfTheKindAskedFor") = []
+{
+    auto directory = createEmptyTestDirectory("library-store-kind");
+    auto tool = directory / "build" / "tool";
+    writeTestFile(tool, "executable");
+    auto store = lockstep::LibraryStore {directory / "cache"};
+    store.storeEntry(sampleKey,
+                     {lockstep::CachedTargetKind::executable, {tool}, "inputs"});
+
+    check(lockstep::findEntryOfKind(
+              store, sampleKey, lockstep::CachedTargetKind::executable)
+              .has_value());
+    check(!lockstep::findEntryOfKind(
+        store, sampleKey, lockstep::CachedTargetKind::staticLibrary));
 };
 
 auto tStoreCounts = test("LibraryStore/addsStatisticsAcrossConfiguresAndLinks") = []
@@ -568,17 +656,17 @@ auto tStoreCounts = test("LibraryStore/addsStatisticsAcrossConfiguresAndLinks") 
     writeTestFile(library, "archive");
     auto store = lockstep::LibraryStore {directory / "cache"};
 
-    store.storeLibrary(sampleKey, library, "inputs");
-    store.addToStatistics({.hits = 1, .misses = 2});
-    store.addToStatistics({.hits = 3});
-    store.addToStatistics({.stores = 1});
+    storeLibrary(store, sampleKey, library, "inputs");
+    store.addToStatistics(countStaticLibraries({.hits = 1, .misses = 2}));
+    store.addToStatistics(countStaticLibraries({.hits = 3}));
+    store.addToStatistics(countStaticLibraries({.stores = 1}));
 
     auto summary = store.summarize();
-    check(summary.libraryCount == 1);
+    check(countStoredLibraries(summary) == 1);
     check(summary.byteCount > 0);
-    check(summary.statistics.hits == 4);
-    check(summary.statistics.misses == 2);
-    check(summary.statistics.stores == 1);
+    check(summary.statistics.staticLibraries.hits == 4);
+    check(summary.statistics.staticLibraries.misses == 2);
+    check(summary.statistics.staticLibraries.stores == 1);
 };
 
 auto tConcurrentCounts = test("LibraryStore/countsTwoProcessesAtOnce") = []
@@ -593,8 +681,9 @@ auto tConcurrentCounts = test("LibraryStore/countsTwoProcessesAtOnce") = []
     check(first.wait() == 0);
     check(second.wait() == 0);
 
-    auto statistics =
-        lockstep::LibraryStore {directory / "cache"}.summarize().statistics;
+    auto statistics = lockstep::LibraryStore {directory / "cache"}
+                          .summarize()
+                          .statistics.staticLibraries;
     check(statistics.hits == 2 * statisticsWritesPerProcess);
     check(statistics.misses == 2 * statisticsWritesPerProcess);
     check(statistics.stores == 2 * statisticsWritesPerProcess);
@@ -606,20 +695,20 @@ auto tCorruptFiles = test("LibraryStore/readsCorruptOrHalfWrittenFilesAsEmpty") 
     auto library = directory / "build" / "libgreeter.a";
     writeTestFile(library, "archive");
     auto store = lockstep::LibraryStore {directory / "cache"};
-    store.storeLibrary(sampleKey, library, "inputs");
-    store.addToStatistics({.hits = 5});
+    storeLibrary(store, sampleKey, library, "inputs");
+    store.addToStatistics(countStaticLibraries({.hits = 5}));
     auto storeDirectory = getCurrentFormatStore(directory / "cache");
 
     writeTestFile(storeDirectory / sampleKey / "manifest.json",
                   "{\"fileName\": \"libgree");
     writeTestFile(storeDirectory / "statistics.json", "not json at all");
 
-    check(!store.findLibrary(sampleKey));
-    check(store.summarize().libraryCount == 0);
-    check(store.summarize().statistics.hits == 0);
+    check(!findLibrary(store, sampleKey));
+    check(countStoredLibraries(store.summarize()) == 0);
+    check(store.summarize().statistics.staticLibraries.hits == 0);
 
-    store.addToStatistics({.hits = 1});
-    check(store.summarize().statistics.hits == 1);
+    store.addToStatistics(countStaticLibraries({.hits = 1}));
+    check(store.summarize().statistics.staticLibraries.hits == 1);
 };
 
 auto tOlderFormat = test("LibraryStore/ignoresEntriesOfAnOlderFormat") = []
@@ -633,10 +722,11 @@ auto tOlderFormat = test("LibraryStore/ignoresEntriesOfAnOlderFormat") = []
                   R"({"hits": 7, "misses": 9})");
     auto store = lockstep::LibraryStore {directory / "cache"};
 
-    check(!store.findLibrary(sampleKey));
+    check(!findLibrary(store, sampleKey));
     auto summary = store.summarize();
-    check(summary.libraryCount == 0);
-    check(summary.statistics.hits == 0 && summary.statistics.misses == 0);
+    check(countStoredLibraries(summary) == 0);
+    check(summary.statistics.staticLibraries.hits == 0
+          && summary.statistics.staticLibraries.misses == 0);
 
     store.clear();
     check(!eacp::Files::isDirectory(directory / "cache" / "lib"));
@@ -651,14 +741,16 @@ auto tStoreClear = test("LibraryStore/clearKeepsPackageSources") = []
     writeTestFile(packageSource, "project(greeter)");
     auto store = lockstep::LibraryStore {directory / "cache"};
 
-    store.storeLibrary(sampleKey, library, "inputs");
-    store.addToStatistics({.hits = 1, .misses = 1, .stores = 1});
+    storeLibrary(store, sampleKey, library, "inputs");
+    store.addToStatistics(
+        countStaticLibraries({.hits = 1, .misses = 1, .stores = 1}));
     store.clear();
 
     auto summary = store.summarize();
-    check(summary.libraryCount == 0);
-    check(summary.statistics.hits == 0 && summary.statistics.misses == 0
-          && summary.statistics.stores == 0);
+    check(countStoredLibraries(summary) == 0);
+    check(summary.statistics.staticLibraries.hits == 0
+          && summary.statistics.staticLibraries.misses == 0
+          && summary.statistics.staticLibraries.stores == 0);
     check(!eacp::Files::isDirectory(directory / "cache" / "lib"));
     check(eacp::Files::isFile(packageSource));
 };
@@ -716,10 +808,12 @@ auto tFetchesFromDirectory =
     auto shared = createSampleEntry("shared inputs");
     auto copiedOnly = createSampleEntry("copied inputs");
     auto missingEverywhere = createSampleEntry("missing inputs");
-    openStoreAtDirectory(directory / "location")
-        .storeLibrary(shared.key, library, shared.inputs);
+    storeLibrary(openStoreAtDirectory(directory / "location"),
+                 shared.key,
+                 library,
+                 shared.inputs);
     auto local = lockstep::LibraryStore {directory / "cache"};
-    local.storeLibrary(copiedOnly.key, library, copiedOnly.inputs);
+    storeLibrary(local, copiedOnly.key, library, copiedOnly.inputs);
 
     auto fetched =
         createCacheAtDirectory(directory / "location")
@@ -729,7 +823,7 @@ auto tFetchesFromDirectory =
     check(fetched.fetchedKeys == std::set<std::string> {shared.key});
     check(fetched.keysLocationLacks == std::vector<std::string> {copiedOnly.key});
     check(fetched.discarded.empty());
-    auto copy = local.findLibrary(shared.key);
+    auto copy = findLibrary(local, shared.key);
     check(copy && eacp::Files::readFile(*copy) == "archive");
 };
 
@@ -741,8 +835,8 @@ auto tDiscardsChanged =
     writeTestFile(library, "archive");
     auto entry = createSampleEntry("inputs");
     auto location = openStoreAtDirectory(directory / "location");
-    location.storeLibrary(entry.key, library, entry.inputs);
-    writeTestFile(*location.findLibrary(entry.key), "changed after it was stored");
+    storeLibrary(location, entry.key, library, entry.inputs);
+    writeTestFile(*findLibrary(location, entry.key), "changed after it was stored");
     auto local = lockstep::LibraryStore {directory / "cache"};
 
     auto fetched = createCacheAtDirectory(directory / "location")
@@ -751,7 +845,40 @@ auto tDiscardsChanged =
     check(fetched.fetchedKeys.empty());
     check(fetched.discarded.size() == 1
           && fetched.discarded.front().reason.find("SHA-256") != std::string::npos);
-    check(!local.findLibrary(entry.key));
+    check(!findLibrary(local, entry.key));
+};
+
+auto tFetchesObjects =
+    test("LibraryCacheLocation/fetchesObjectFilesAndDiscardsAChangedOne") = []
+{
+    auto directory = createEmptyTestDirectory("library-cache-location-objects");
+    auto first = directory / "build" / "first.cpp.o";
+    auto second = directory / "build" / "second.cpp.o";
+    writeTestFile(first, "first object");
+    writeTestFile(second, "second object");
+    auto kept = createSampleEntry("kept inputs");
+    auto changed = createSampleEntry("changed inputs");
+    auto location = openStoreAtDirectory(directory / "location");
+
+    for (const auto& entry: {kept, changed})
+        location.storeEntry(entry.key,
+                            {lockstep::CachedTargetKind::objectLibrary,
+                             {first, second},
+                             entry.inputs});
+
+    writeTestFile(location.findEntry(changed.key)->getFilePaths().back(), "changed");
+    auto local = lockstep::LibraryStore {directory / "cache"};
+
+    auto fetched = createCacheAtDirectory(directory / "location")
+                       .fetchLibraries({{kept.key, changed.key}, {}}, local);
+
+    check(fetched.fetchedKeys == std::set<std::string> {kept.key});
+    check(fetched.discarded.size() == 1
+          && fetched.discarded.front().key == changed.key);
+    auto copy = local.findEntry(kept.key);
+    check(copy && copy->manifest.kind == lockstep::CachedTargetKind::objectLibrary);
+    check(copy
+          && eacp::Files::readFile(copy->getFilePaths().back()) == "second object");
 };
 
 auto tSendsToDirectory = test("LibraryCacheLocation/sendsToDirectory") = []
@@ -761,15 +888,17 @@ auto tSendsToDirectory = test("LibraryCacheLocation/sendsToDirectory") = []
     writeTestFile(library, "archive");
     auto entry = createSampleEntry("inputs");
     auto local = lockstep::LibraryStore {directory / "cache"};
-    local.storeLibrary(entry.key, library, entry.inputs);
+    storeLibrary(local, entry.key, library, entry.inputs);
     auto cache = createCacheAtDirectory(directory / "location");
 
     cache.sendLibraries({entry.key}, local);
     cache.sendLibraries({entry.key}, local);
 
-    auto sent = openStoreAtDirectory(directory / "location").readManifest(entry.key);
-    check(sent && sent->inputs == entry.inputs);
-    check(sent && sent->librarySha256 == lockstep::computeFileSha256Hex(library));
+    auto sent = openStoreAtDirectory(directory / "location").findEntry(entry.key);
+    check(sent && sent->manifest.inputs == entry.inputs);
+    check(sent
+          && sent->manifest.files.front().sha256
+                 == lockstep::computeFileSha256Hex(library));
 };
 
 auto tConcurrentSends =
@@ -779,8 +908,11 @@ auto tConcurrentSends =
     auto library = directory / "build" / "libgreeter.a";
     writeTestFile(library, "archive");
     auto entry = createSampleEntry("inputs");
-    lockstep::LibraryStore {directory / "cache"}.storeLibrary(
-        entry.key, library, entry.inputs);
+    storeLibrary(lockstep::LibraryStore {directory / "cache"},
+
+                 entry.key,
+                 library,
+                 entry.inputs);
     auto senderArguments =
         eacp::Vector<std::string> {std::string {librarySenderArgument},
                                    (directory / "cache").str(),
@@ -794,7 +926,7 @@ auto tConcurrentSends =
     check(second.wait() == 0);
 
     auto location = openStoreAtDirectory(directory / "location");
-    check(location.findLibrary(entry.key).has_value());
+    check(findLibrary(location, entry.key).has_value());
     auto entries = eacp::Files::listDirectory(location.getFormatDirectory(), {});
     check(entries.size() == 1);
 };
@@ -807,7 +939,7 @@ auto tClearDuringSend =
     writeTestFile(library, "archive");
     auto entry = createSampleEntry("inputs");
     auto local = lockstep::LibraryStore {directory / "cache"};
-    local.storeLibrary(entry.key, library, entry.inputs);
+    storeLibrary(local, entry.key, library, entry.inputs);
     auto testExecutable = eacp::FilePath {testExecutablePath};
     auto fakeCMake = directory / "fake-cmake" / testExecutable.fileName();
     eacp::Files::createDirectories(fakeCMake.parentDirectory());
@@ -860,13 +992,13 @@ auto tClearKeepsHeldEntry =
     auto held = createSampleEntry("held inputs");
     auto notHeld = createSampleEntry("free inputs");
     auto store = lockstep::LibraryStore {directory / "cache"};
-    store.storeLibrary(held.key, library, held.inputs);
-    store.storeLibrary(notHeld.key, library, notHeld.inputs);
+    storeLibrary(store, held.key, library, held.inputs);
+    storeLibrary(store, notHeld.key, library, notHeld.inputs);
     auto clearFailure = std::string {};
 
     {
         auto openLibrary =
-            std::ifstream {eacp::toStdPath(*store.findLibrary(held.key))};
+            std::ifstream {eacp::toStdPath(*findLibrary(store, held.key))};
 
         try
         {
@@ -880,8 +1012,8 @@ auto tClearKeepsHeldEntry =
 
     check(clearFailure.find(held.key) != std::string::npos);
     check(clearFailure.find(notHeld.key) == std::string::npos);
-    check(store.findLibrary(held.key).has_value());
-    check(!store.findLibrary(notHeld.key));
+    check(findLibrary(store, held.key).has_value());
+    check(!findLibrary(store, notHeld.key));
     store.clear();
     check(!eacp::Files::isDirectory(directory / "cache" / "lib"));
 };
@@ -911,7 +1043,8 @@ int runStatisticsWriter(std::string_view cacheDirectory)
     auto store = lockstep::LibraryStore {eacp::FilePath {cacheDirectory}};
 
     for (auto write = 0; write < statisticsWritesPerProcess; ++write)
-        store.addToStatistics({.hits = 1, .misses = 1, .stores = 1});
+        store.addToStatistics(
+            countStaticLibraries({.hits = 1, .misses = 1, .stores = 1}));
 
     return 0;
 }

@@ -31,12 +31,17 @@ lockstep_add_package(NAME emberstore GITHUB tamber-inc/emberstore
 add_library(lockstep-lib STATIC
         src/CMakeSnippet.cpp
         src/Commands.cpp
+        src/CompileFlags.cpp
+        src/ConfigureDescription.cpp
+        src/ExecutableCache.cpp
+        src/KeyText.cpp
         src/Messages.cpp
         src/Download.cpp
         src/Git.cpp
         src/LibraryCache.cpp
         src/LibraryCacheCommands.cpp
         src/LibraryCacheLocation.cpp
+        src/LibraryCachePlan.cpp
         src/LibraryStore.cpp
         src/LockFile.cpp
         src/LongPath.cpp

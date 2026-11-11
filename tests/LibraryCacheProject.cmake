@@ -20,11 +20,16 @@ function(run_step)
 endfunction()
 
 # Runs cmake with `cmake -E env <environment>` in front, so the library cache
-# setting can come from the environment alone.
+# setting can come from the environment alone. CONFIGURE_GENERATOR, when set,
+# replaces GENERATOR.
 function(run_configure build environment)
+    set(generator "${GENERATOR}")
+    if (CONFIGURE_GENERATOR)
+        set(generator "${CONFIGURE_GENERATOR}")
+    endif ()
     run_step("${CMAKE_COMMAND}" -E env --unset=LOCKSTEP_LIBRARY_CACHE
             --unset=LOCKSTEP_LIBRARY_CACHE_LOCATION ${environment}
-            "${CMAKE_COMMAND}" -S "${PROJECT_DIR}" -B "${WORK_DIR}/${build}" -G "${GENERATOR}"
+            "${CMAKE_COMMAND}" -S "${PROJECT_DIR}" -B "${WORK_DIR}/${build}" -G "${generator}"
             "-DLOCKSTEP_SHIM=${LOCKSTEP_SHIM}" "-DLOCKSTEP_EXECUTABLE=${LOCKSTEP_EXECUTABLE}"
             "-DLOCKSTEP_CACHE=${WORK_DIR}/cache" "-DLOCKSTEP_LOCK_FILE=${WORK_DIR}/lockstep.lock"
             "-DFIXTURE_URL=${fixture_url}" -DCMAKE_BUILD_TYPE=Release ${ARGN})
@@ -101,6 +106,57 @@ int greet()
     return (GREETER_LOUD ? 100 : 42) + GREETER_EXTRA + greeter_offset();
 }
 ]=])
+git(-C "${fixture}" init --quiet -b main)
+git(-C "${fixture}" add -A)
+git(-C "${fixture}" commit --quiet -m fixture)
+
+set(fixture_url "file://${fixture}")
+if (CMAKE_HOST_WIN32)
+    set(fixture_url "file:///${fixture}")
+endif ()
+endmacro()
+
+# Creates the toolmaker package as a git repository in WORK_DIR and sets
+# fixture_url: a static library, a build tool linking it that writes a source
+# the consumer compiles, and an object library.
+macro(create_toolmaker_fixture)
+file(REMOVE_RECURSE "${WORK_DIR}")
+
+set(fixture "${WORK_DIR}/fixtures/toolmaker.git")
+file(WRITE "${fixture}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.25)
+project(toolmaker LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+add_library(toolmaker_number STATIC number.cpp)
+add_executable(toolmaker_generator generator.cpp)
+target_link_libraries(toolmaker_generator PRIVATE toolmaker_number)
+add_library(toolmaker_objects OBJECT first_object.cpp second_object.cpp)
+function(toolmaker_generate_source target)
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/${target}_generated.cpp")
+    add_custom_command(OUTPUT "${output}"
+            COMMAND toolmaker_generator "${output}"
+            DEPENDS toolmaker_generator)
+    target_sources(${target} PRIVATE "${output}")
+endfunction()
+]=])
+file(WRITE "${fixture}/number.cpp" "int toolmakerNumber() { return 5 + TOOLMAKER_OFFSET; }\n")
+file(WRITE "${fixture}/generator.cpp" [=[
+#include <fstream>
+#include <string>
+
+int toolmakerNumber();
+
+int main(int, char** arguments)
+{
+    auto output = std::ofstream {arguments[1], std::ios::binary};
+    output << "int generatedNumber() { return " << std::to_string(toolmakerNumber())
+           << "; }\n";
+    return output ? 0 : 1;
+}
+]=])
+file(WRITE "${fixture}/first_object.cpp" "int firstObjectNumber() { return 1; }\n")
+file(WRITE "${fixture}/second_object.cpp" "int secondObjectNumber() { return 2; }\n")
 git(-C "${fixture}" init --quiet -b main)
 git(-C "${fixture}" add -A)
 git(-C "${fixture}" commit --quiet -m fixture)

@@ -37,9 +37,9 @@ constexpr auto commandsHelp = R"(commands:
   begin, add, provide, library-cache
                  run by the CMake module during configure; add and provide take
                  the package's CMake arguments after --
-  use-cached-library, store-libraries
-                 run by the build in place of, or around, the link command
-                 after --, when LOCKSTEP_LIBRARY_CACHE is ON
+  use-cached-library, use-cached-objects, store-libraries
+                 run by the build in place of, or around, the link or compile
+                 command after --, when LOCKSTEP_LIBRARY_CACHE is ON
   send-libraries started by store-libraries and library-cache to copy
                  libraries to LOCKSTEP_LIBRARY_CACHE_LOCATION)";
 
@@ -128,7 +128,7 @@ std::optional<int> runProjectPinnedVersionInstead()
 using CommandFunction = int (*)(const lockstep::CommandOptions&);
 
 constexpr auto commandFunctions =
-    std::array<std::pair<std::string_view, CommandFunction>, 12> {
+    std::array<std::pair<std::string_view, CommandFunction>, 13> {
         {{"begin", lockstep::runBeginCommand},
          {"add", lockstep::runAddCommand},
          {"provide", lockstep::runProvideCommand},
@@ -138,6 +138,7 @@ constexpr auto commandFunctions =
          {"cmake-module", lockstep::runCMakeModuleCommand},
          {"library-cache", lockstep::runLibraryCacheCommand},
          {"use-cached-library", lockstep::runUseCachedLibraryCommand},
+         {"use-cached-objects", lockstep::runUseCachedObjectsCommand},
          {"store-libraries", lockstep::runStoreLibrariesCommand},
          {"send-libraries", lockstep::runSendLibrariesCommand},
          {machineWideCommand, lockstep::runCacheCommand}}};
@@ -211,6 +212,19 @@ void addBehaviourOptions(eacp::Args::Parser& parser,
                   options.libraries,
                   "a cached library for use-cached-library; <key>=<library> for "
                   "store-libraries");
+    parser.option("--executable",
+                  options.executables,
+                  "<key>=<executable> the link store-libraries runs writes");
+    parser.option("--object-library",
+                  options.objectLibraries,
+                  "<key>=<object files> of an object library, for store-libraries");
+    parser.option("--stored-object",
+                  options.storedObjects,
+                  "a cached object file for use-cached-objects, in --objects order");
+    parser.option("--objects",
+                  options.objects,
+                  "the object library's object files, a ;-list, for "
+                  "use-cached-objects");
     parser.option("--library-cache-location",
                   options.libraryCacheLocation,
                   "a directory or [user@]host:directory holding the library cache, "

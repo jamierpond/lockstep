@@ -50,7 +50,7 @@ it waits for a project that needs it.
 |---|---|---|
 | Lock on dependency commits | on | `mode = "unlocked"` turns it off |
 | Merkle content check | on | `verify = "off"` turns it off |
-| Cache of packages' built static libraries | off | `LOCKSTEP_LIBRARY_CACHE=ON` in the environment for every project, or `-DLOCKSTEP_LIBRARY_CACHE=ON` for one build directory |
+| Cache of packages' built static libraries, executables and object files | off | `LOCKSTEP_LIBRARY_CACHE=ON` in the environment for every project, or `-DLOCKSTEP_LIBRARY_CACHE=ON` for one build directory |
 | One library cache for several machines | off | `LOCKSTEP_LIBRARY_CACHE_LOCATION=<directory>` or `[user@]host:<directory>`, in the environment or as `-D` on a build directory |
 | `lockstep.toml` manifest | off | add the file |
 | Record the toolchain version | off | `toolchain = "record"` |

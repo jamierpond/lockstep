@@ -13,6 +13,7 @@
 #include <Miro/Json.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <random>
@@ -26,6 +27,15 @@ namespace
 constexpr auto manifestName = "manifest";
 constexpr auto statisticsName = "statistics";
 constexpr auto manifestIndent = 2;
+
+using CountsMember = LibraryCacheCounts LibraryCacheStatistics::*;
+
+constexpr auto countsOfEachKind =
+    std::array<std::pair<CachedTargetKind, CountsMember>, 3> {
+        {{CachedTargetKind::staticLibrary, &LibraryCacheStatistics::staticLibraries},
+         {CachedTargetKind::executable, &LibraryCacheStatistics::executables},
+         {CachedTargetKind::objectLibrary,
+          &LibraryCacheStatistics::objectLibraries}}};
 
 // A lost cache file only costs a rebuild, so no write waits for the disk.
 constexpr auto storeDurability = emberstore::Durability::Atomic;
@@ -131,6 +141,29 @@ eacp::Vector<std::string> deleteTree(const eacp::FilePath& path)
     return {};
 }
 
+CountsMember findCountsMember(CachedTargetKind kind)
+{
+    for (auto [entryKind, counts]: countsOfEachKind)
+    {
+        if (entryKind == kind)
+            return counts;
+    }
+
+    throw std::logic_error("the library cache counts no such kind of entry");
+}
+
+// Object files of different sources can share a file name, so each is stored
+// under its place in the list.
+std::string getStoredFileName(CachedTargetKind kind,
+                              std::size_t index,
+                              const eacp::FilePath& file)
+{
+    if (kind == CachedTargetKind::objectLibrary)
+        return std::to_string(index) + "-" + file.fileName();
+
+    return file.fileName();
+}
+
 emberstore::Document<LibraryCacheStatistics>
     openStatistics(const eacp::FilePath& storeRoot)
 {
@@ -151,10 +184,60 @@ std::optional<LibraryManifest>
                         .document<LibraryManifest>(manifestName)
                         .read();
 
-    if (manifest.fileName.empty())
+    if (manifest.files.empty())
         return std::nullopt;
 
     return manifest;
+}
+
+std::vector<eacp::FilePath> StoredEntry::getFilePaths() const
+{
+    auto paths = std::vector<eacp::FilePath> {};
+
+    for (const auto& file: manifest.files)
+        paths.push_back(directory / file.name);
+
+    return paths;
+}
+
+LibraryCacheCounts& LibraryCacheStatistics::getCounts(CachedTargetKind kind)
+{
+    return this->*findCountsMember(kind);
+}
+
+const LibraryCacheCounts&
+    LibraryCacheStatistics::getCounts(CachedTargetKind kind) const
+{
+    return this->*findCountsMember(kind);
+}
+
+void addStatistics(LibraryCacheStatistics& total,
+                   const LibraryCacheStatistics& added)
+{
+    for (auto kind: getEveryCachedTargetKind())
+    {
+        auto& counts = total.getCounts(kind);
+        const auto& addedCounts = added.getCounts(kind);
+        counts.hits += addedCounts.hits;
+        counts.misses += addedCounts.misses;
+        counts.stores += addedCounts.stores;
+        counts.fetchedHits += addedCounts.fetchedHits;
+    }
+}
+
+const std::vector<CachedTargetKind>& getEveryCachedTargetKind()
+{
+    static const auto kinds = []
+    {
+        auto everyKind = std::vector<CachedTargetKind> {};
+
+        for (auto [kind, counts]: countsOfEachKind)
+            everyKind.push_back(kind);
+
+        return everyKind;
+    }();
+
+    return kinds;
 }
 
 std::string getLibraryFormatDirectoryName()
@@ -178,31 +261,24 @@ eacp::FilePath LibraryStore::getEntryDirectory(const std::string& key) const
     return root / key;
 }
 
-std::optional<LibraryManifest>
-    LibraryStore::readManifest(const std::string& key) const
+std::optional<StoredEntry> LibraryStore::findEntry(const std::string& key) const
 {
-    return readLibraryManifest(getEntryDirectory(key));
-}
-
-std::optional<eacp::FilePath> LibraryStore::findLibrary(const std::string& key) const
-{
-    auto entryDirectory = getEntryDirectory(key);
-    auto manifest = readLibraryManifest(entryDirectory);
+    auto entry = StoredEntry {getEntryDirectory(key), {}};
+    auto manifest = readLibraryManifest(entry.directory);
 
     if (!manifest)
         return std::nullopt;
 
-    auto library = entryDirectory / manifest->fileName;
+    entry.manifest = *manifest;
 
-    if (!eacp::Files::isFile(library))
+    if (!std::ranges::all_of(entry.getFilePaths(), eacp::Files::isFile))
         return std::nullopt;
 
-    return library;
+    return entry;
 }
 
-bool LibraryStore::storeLibrary(const std::string& key,
-                                const eacp::FilePath& library,
-                                const std::string& inputs) const
+bool LibraryStore::storeEntry(const std::string& key,
+                              const EntryToStore& entry) const
 {
     auto destination = getEntryDirectory(key);
 
@@ -214,14 +290,20 @@ bool LibraryStore::storeLibrary(const std::string& key,
     // A random name beside the entry, so two builds storing one key never
     // write into the same directory and the rename publishes it whole.
     auto staging = eacp::TemporaryFile {root, ".staging"};
-    auto stagedLibrary = staging.path() / library.fileName();
+    auto manifest = LibraryManifest {entry.kind, {}, entry.inputs};
 
-    if (!eacp::Files::copyFile(library, stagedLibrary))
-        throw std::runtime_error("cannot copy " + library.str() + " into "
-                                 + staging.path().str());
+    for (auto index = std::size_t {0}; index < entry.files.size(); ++index)
+    {
+        const auto& file = entry.files[index];
+        auto name = getStoredFileName(entry.kind, index, file);
+        auto stagedFile = staging.path() / name;
 
-    auto manifest = LibraryManifest {
-        library.fileName(), inputs, computeFileSha256Hex(stagedLibrary)};
+        if (!eacp::Files::copyFile(file, stagedFile))
+            throw std::runtime_error("cannot copy " + file.str() + " into "
+                                     + staging.path().str());
+
+        manifest.files.push_back({name, computeFileSha256Hex(stagedFile)});
+    }
 
     writeManifest(staging.path(), manifest);
 
@@ -229,7 +311,7 @@ bool LibraryStore::storeLibrary(const std::string& key,
         return true;
 
     if (!eacp::Files::isDirectory(destination))
-        throw std::runtime_error("cannot move the stored library into "
+        throw std::runtime_error("cannot move the stored entry into "
                                  + destination.str());
 
     return false;
@@ -238,12 +320,7 @@ bool LibraryStore::storeLibrary(const std::string& key,
 void LibraryStore::addToStatistics(const LibraryCacheStatistics& added) const
 {
     auto addCounts = [&](LibraryCacheStatistics& total)
-    {
-        total.hits += added.hits;
-        total.misses += added.misses;
-        total.stores += added.stores;
-        total.fetchedHits += added.fetchedHits;
-    };
+    { addStatistics(total, added); };
 
     auto statistics = openStatistics(root);
     auto deadline = std::chrono::steady_clock::now() + statisticsUpdatePatience;
@@ -268,8 +345,11 @@ LibraryStoreSummary LibraryStore::summarize() const
 
     for (const auto& entry: eacp::Files::listDirectory(root, {}))
     {
-        if (isNamedLikeLibraryKey(entry.path) && findLibrary(entry.path.fileName()))
-            ++summary.libraryCount;
+        if (!isNamedLikeLibraryKey(entry.path))
+            continue;
+
+        if (auto stored = findEntry(entry.path.fileName()))
+            ++summary.entryCounts[stored->manifest.kind];
     }
 
     auto options = eacp::Files::DirectoryOptions {};

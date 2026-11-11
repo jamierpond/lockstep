@@ -20,7 +20,7 @@ struct CommandOptions
     std::string command;
     eacp::Vector<std::string> names;
     // A package's CMake arguments for add and provide; the wrapped command for
-    // use-cached-library and store-libraries.
+    // use-cached-library, use-cached-objects and store-libraries.
     std::vector<std::string> argumentsAfterSeparator;
     Mode mode = Mode::locked;
     bool isCI = false;
@@ -36,6 +36,14 @@ struct CommandOptions
     eacp::FilePath output;
     eacp::FilePath input;
     eacp::Vector<std::string> libraries;
+    // <key>=<file> of each executable, and <key>=<objects> of each object
+    // library, that store-libraries stores after the link.
+    eacp::Vector<std::string> executables;
+    eacp::Vector<std::string> objectLibraries;
+    // The stored object files use-cached-objects copies, in the order of the
+    // ;-list in `objects`, $<TARGET_OBJECTS:...> of the object library.
+    eacp::Vector<std::string> storedObjects;
+    std::string objects;
     // LOCKSTEP_LIBRARY_CACHE_LOCATION: a directory or [user@]host:directory.
     std::string libraryCacheLocation;
     std::string topLevelIncludes;
@@ -53,6 +61,7 @@ int runRootCommand(const CommandOptions& options);
 int runCMakeModuleCommand(const CommandOptions& options);
 int runLibraryCacheCommand(const CommandOptions& options);
 int runUseCachedLibraryCommand(const CommandOptions& options);
+int runUseCachedObjectsCommand(const CommandOptions& options);
 int runStoreLibrariesCommand(const CommandOptions& options);
 int runSendLibrariesCommand(const CommandOptions& options);
 int runCacheCommand(const CommandOptions& options);

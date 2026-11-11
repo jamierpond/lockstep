@@ -143,7 +143,7 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp GIT_TAG main
 | `LOCKSTEP_CACHE` | The shared cache (also an environment variable). Default `~/.cache/lockstep`, `$XDG_CACHE_HOME/lockstep`, or `%LOCALAPPDATA%\lockstep` on Windows |
 | `LOCKSTEP_LOCK_FILE` | Default `<top-level source dir>/lockstep.lock` |
 | `LOCKSTEP_EXECUTABLE` | Run this `lockstep` binary instead of downloading the pinned release. The environment variable wins over the cached value |
-| `LOCKSTEP_LIBRARY_CACHE` | `ON` links a package's static libraries from `<cache>/lib` when an earlier build compiled them from the same inputs, instead of compiling them again. Also an environment variable, which turns the cache on for every project; `-DLOCKSTEP_LIBRARY_CACHE=ON` or `OFF` on a build directory wins over it. Default `OFF`; see [The library cache](#the-library-cache) |
+| `LOCKSTEP_LIBRARY_CACHE` | `ON` takes a package's static libraries, the executables it builds and its object libraries' object files from `<cache>/lib` when an earlier build built them from the same inputs, instead of building them again. Also an environment variable, which turns the cache on for every project; `-DLOCKSTEP_LIBRARY_CACHE=ON` or `OFF` on a build directory wins over it. Default `OFF`; see [The library cache](#the-library-cache) |
 | `LOCKSTEP_LIBRARY_CACHE_LOCATION` | Where the library cache is, so several machines share it: a directory, or `[user@]host:directory` on a Unix host reached over ssh. Also an environment variable; `-DLOCKSTEP_LIBRARY_CACHE_LOCATION=...` on a build directory wins over it, and an empty value turns it off there. Unset, the library cache is `<cache>/lib` alone; see [One library cache for several machines](#one-library-cache-for-several-machines) |
 
 ### The library cache
@@ -151,8 +151,10 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp GIT_TAG main
 Without it, every new build directory compiles every package again: a second
 checkout of a project, or a wiped `build/`, rebuilds eacp from scratch even
 though nothing about it changed. With the library cache on, a package's
-static library is compiled once per set of inputs, and every later build
-directory on the machine, of any project, links the copy in `<cache>/lib`.
+static libraries, the executables it builds (such as a code generator the build
+runs) and the object files of its object libraries are built once per set of
+inputs, and every later build directory on the machine, of any project, copies
+them from `<cache>/lib`.
 
 Turn it on for every lockstep project on the machine by setting the
 environment variable once, in your shell profile:
@@ -214,17 +216,48 @@ system is not Apple's.
   the key was computed from; `_lockstep/library-cache/inputs/<key>.txt` in the
   build directory holds the same for this configure, to compare against.
 
+Executables a locked package builds, such as ResEmbed's `ResourceGenerator`
+that a build runs to generate sources, are cached the same way. The key of an
+executable covers everything a library's key covers for its own sources, and
+what decides its link: the key of every static and object library it links, its
+link options and flags and those of every target it links (`LINK_OPTIONS`,
+`LINK_FLAGS`, `INTERFACE_LINK_OPTIONS`, link directories, rpath settings, the
+imported libraries' files), `CMAKE_EXE_LINKER_FLAGS`, the linker's path, ID and
+version, the libraries the toolchain links from the system
+(`CMAKE_<LANG>_STANDARD_LIBRARIES` and the implicit link libraries), and the
+target platform. It always covers the cache directory's path, even when the
+flags map it away. On a hit the executable compiles one stub, links nothing,
+and its link step copies the stored file into place under a temporary name and
+renames it over the old one, so a signed macOS executable that ran before is
+replaced rather than rewritten. On a miss its own link stores it.
+
+An object library's objects reach their consumers as files, through
+`$<TARGET_OBJECTS:...>`, so a hit keeps its sources: each compile step, through
+the target's `RULE_LAUNCH_COMPILE`, copies the stored object for that source into
+place instead of running the compiler. Its key is a static library's. The
+objects are stored, in the order `$<TARGET_OBJECTS:...>` lists them, by the
+first link that reads all of them. Each copy starts lockstep once, through
+`cmake -E env`: about 20 ms per object on Linux.
+
 Configure prints `lockstep: library cache: <n> hits, <n> misses, <n> skipped`
 and adds its hits and misses to the counts in
 `<cache>/lib/format-<n>/statistics.json`; the link that stores a library adds
-one store there.
+one store there. When the packages build executables or object libraries, the
+line counts each kind on its own:
+
+```console
+-- lockstep: library cache: static libraries: 15 hits, 18 misses, 0 skipped; executables: 2 hits, 0 misses, 0 skipped; object libraries: 2 hits, 0 misses, 0 skipped (--log-level=VERBOSE names them)
+```
+
 `--log-level=VERBOSE` names each library and why one was skipped.
 `lockstep cache stats` prints the counts, and `lockstep cache clear` deletes
 the stored libraries (see [The command line](#the-command-line)). It does not
 cache:
 
-- shared libraries, object libraries, or a static library whose objects
-  another target takes through `$<TARGET_OBJECTS:...>`;
+- shared libraries, or a static library whose objects another target takes
+  through `$<TARGET_OBJECTS:...>`;
+- executables and libraries the project itself declares, outside its
+  packages;
 - a package from a local `SOURCE_DIR`, a `<Name>_SOURCE` override or a
   `SOURCE_DIR` checkout, or a library that links a target of one, or of the
   project, since no hash covers those files;
@@ -242,7 +275,21 @@ cache:
   information in the library, and makes Debug builds cacheable;
 - a library compiled with `-gsplit-dwarf`, which writes the debug information
   to a `.dwo` file beside each object, which the cache does not store.
-  `-gsplit-dwarf=single` keeps it in the object, and is cached.
+  `-gsplit-dwarf=single` keeps it in the object, and is cached;
+- an executable that links a shared library this build directory builds, links
+  an executable, or links a library the cache skips;
+- an app bundle (`MACOSX_BUNDLE`), or an executable with `ENABLE_EXPORTS`,
+  whose link writes an import library beside it;
+- an executable MSVC's linker writes a `.pdb` for: `/DEBUG` in its link flags,
+  which CMake's Debug and RelWithDebInfo builds have;
+- an executable whose link settings name the build directory, such as a
+  `BUILD_RPATH` or an imported library built there, so the copy could point
+  into the build directory that linked it;
+- an executable that links a target a package's directory declares without
+  `GLOBAL` (such as `Threads::Threads` from `find_package(Threads)`), whose
+  link settings the top-level directory cannot read;
+- an executable when CMake reports no linker version
+  (`CMAKE_<LANG>_COMPILER_LINKER_VERSION`, which CMake 3.29 and newer set).
 
 The key does not read the contents of headers outside the packages (system
 and SDK headers) or of files in the build directory (a header a package writes
@@ -252,7 +299,13 @@ assembles, such as `${prefix}_OPTION`, and a linked imported target that a
 package's directory declares without `GLOBAL`, which the top-level directory
 cannot see: its usage requirements stay out of the key, and libraries linked
 only through it are never stored. A change to one of those can give a hit
-that links a stale library; `lockstep cache clear` rebuilds everything.
+that links a stale library; `lockstep cache clear` rebuilds everything. Nor
+does an executable's key read the contents of the system libraries it links,
+only their names and paths, as for system headers. On Apple systems the debug
+information of a cached executable stays in the object files of the build
+directory that linked it, as the linker always leaves it there: once that
+directory is deleted, a debugger has no line information for the executable's
+own sources.
 
 On Windows with whole-program optimisation (`/GL`), the stored `.lib` files
 hold MSVC's intermediate code rather than machine code, so they are large:
@@ -263,7 +316,8 @@ eacp's 8 libraries took 190 MiB, against 5.5 MiB on macOS.
 Each machine compiles every package once on its own, even when another
 machine with the same compiler and SDK already has. With
 `LOCKSTEP_LIBRARY_CACHE_LOCATION` set, machines share one library cache: a
-library one machine built is linked on the others without compiling.
+library, executable or object library one machine built is used on the others
+without compiling. Each is one entry, carried the same way.
 
 ```bash
 export LOCKSTEP_LIBRARY_CACHE=ON
@@ -284,7 +338,7 @@ The linker needs a file on this disk, so lockstep keeps a copy of every library
 it fetches or builds in `<cache>/lib`, and looks there first. At the end of a
 configure it asks the location, in one ssh connection, for every library this
 machine has no copy of, and the host sends back a tar of the ones it holds.
-Each is checked before it is used: the library file must match the SHA-256 its
+Each is checked before it is used: every file in it must match the SHA-256 its
 `manifest.json` records, and the manifest's key inputs must hash to the key. A
 library that fails is discarded with a warning and built from source. Configure
 prints:
@@ -362,7 +416,7 @@ library cache /home/you/.cache/lockstep/lib
     not stored  49        no link used it: the project does not build it, or has not built yet
 ```
 
-`libraries` counts the libraries stored in `<cache>/lib`, `size` is every file
+`libraries` counts the static libraries stored in `<cache>/lib`, `size` is every file
 of the current format under it, and the counts add up every configure and link
 since the last `cache clear`. A miss is stored only when a link reads the
 library, so a library a project configures but never links (a package library
@@ -372,7 +426,10 @@ and both build it store it once, so one of the two counts as `not stored`.
 With `LOCKSTEP_LIBRARY_CACHE_LOCATION` set, the first line is
 `library cache at <location>; this machine's copies in <cache>/lib`, and a
 `fetched` line under `hits` counts the hits whose library was fetched from the
-location; the counts are this machine's, kept in `<cache>/lib`.
+location; the counts are this machine's, kept in `<cache>/lib`. Once
+executables or object libraries are stored or counted, the first line reads
+`static libraries`, and each kind follows with its own `stored now`, hits and
+misses, indented under its name.
 `cache clear` deletes `<cache>/lib`, including entries an older lockstep
 stored in another format (which no lookup reads), and nothing else: the
 package sources in `<cache>/src`, the git mirrors in `<cache>/git` and the
@@ -469,7 +526,7 @@ so they need the network. `.github/workflows/build.yml` builds and tests all
 six targets on every push. Pushing a `v<version>` tag also publishes the
 binaries as a release with build provenance attestations, prints
 `cmake/lockstep.cmake` with that release's version and hashes filled in (also
-uploaded as the `bootstrap` artifact), and, when the
+uploaded as the release's `lockstep.cmake` asset), and, when the
 `PACKAGING_TOKEN` secret holds a token that can push to them, updates the
 Homebrew formula in `jamierpond/homebrew-tap` and the Scoop manifest in
 `jamierpond/scoop-bucket` (repository variables `TAP_REPOSITORY` and

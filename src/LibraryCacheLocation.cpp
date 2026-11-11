@@ -183,27 +183,43 @@ bool isSshHostPart(const std::string& text, std::size_t colon)
            && std::ranges::none_of(host, isPathSeparator);
 }
 
+std::optional<std::string> findReasonInStoredFile(const eacp::FilePath& entry,
+                                                  const StoredFile& file)
+{
+    if (eacp::FilePath {file.name}.fileName() != file.name)
+        return "its manifest names the file " + file.name
+               + ", which is not a plain file name";
+
+    auto path = entry / file.name;
+
+    if (!eacp::Files::isFile(path))
+        return "it holds no " + file.name;
+
+    if (computeFileSha256Hex(path) != file.sha256)
+        return file.name + " does not match the SHA-256 its manifest records for it";
+
+    return std::nullopt;
+}
+
 std::optional<std::string> findReasonToDiscard(const std::string& key,
                                                const eacp::FilePath& entry,
                                                const LibraryManifest& manifest)
 {
-    if (eacp::FilePath {manifest.fileName}.fileName() != manifest.fileName)
-        return "its manifest names the file " + manifest.fileName
-               + ", which is not a plain file name";
-
     if (computeSha256Hex(manifest.inputs) != key)
         return "the key inputs in its manifest do not hash to its key";
 
-    auto library = entry / manifest.fileName;
-
-    if (!eacp::Files::isFile(library))
-        return "it holds no " + manifest.fileName;
-
-    if (computeFileSha256Hex(library) != manifest.librarySha256)
-        return manifest.fileName
-               + " does not match the SHA-256 its manifest records for it";
+    for (const auto& file: manifest.files)
+    {
+        if (auto reason = findReasonInStoredFile(entry, file))
+            return reason;
+    }
 
     return std::nullopt;
+}
+
+EntryToStore createEntryToStore(const StoredEntry& stored)
+{
+    return {stored.manifest.kind, stored.getFilePaths(), stored.manifest.inputs};
 }
 } // namespace
 
@@ -244,7 +260,7 @@ public:
 
         for (const auto& key: request.copiedKeys)
         {
-            if (!store.findLibrary(key))
+            if (!store.findEntry(key))
                 lacks.push_back(key);
         }
 
@@ -256,31 +272,30 @@ public:
     {
         for (const auto& key: keys)
         {
-            auto manifest = localCopies.readManifest(key);
-            auto library = localCopies.findLibrary(key);
-
-            if (manifest && library)
-                store.storeLibrary(key, *library, manifest->inputs);
+            if (auto stored = localCopies.findEntry(key))
+                store.storeEntry(key, createEntryToStore(*stored));
         }
     }
 
 private:
     void copyEntry(const std::string& key, const eacp::FilePath& destination) const
     {
-        auto library = store.findLibrary(key);
+        auto stored = store.findEntry(key);
 
-        if (!library)
+        if (!stored)
             return;
 
-        auto entry = library->parentDirectory();
         auto isCopied =
-            eacp::Files::copyFile(*library, destination / library->fileName())
-            && eacp::Files::copyFile(getLibraryManifestPath(entry),
-                                     getLibraryManifestPath(destination));
+            eacp::Files::copyFile(getLibraryManifestPath(stored->directory),
+                                  getLibraryManifestPath(destination));
+
+        for (const auto& file: stored->getFilePaths())
+            isCopied = isCopied
+                       && eacp::Files::copyFile(file, destination / file.fileName());
 
         if (!isCopied)
-            throw std::runtime_error("cannot copy " + entry.str() + " into "
-                                     + destination.str());
+            throw std::runtime_error("cannot copy " + stored->directory.str()
+                                     + " into " + destination.str());
     }
 
     LibraryStore store;
@@ -459,7 +474,7 @@ LibraryFetchResult
             continue;
         }
 
-        localCopies.storeLibrary(key, entry / manifest->fileName, manifest->inputs);
+        localCopies.storeEntry(key, createEntryToStore({entry, *manifest}));
         result.fetchedKeys.insert(key);
     }
 

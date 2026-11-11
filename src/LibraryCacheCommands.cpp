@@ -2,6 +2,8 @@
 #include "Commands.h"
 #include "LibraryCache.h"
 #include "LibraryCacheLocation.h"
+#include "LibraryCachePlan.h"
+#include "LongPath.h"
 #include "LibraryStore.h"
 #include "Messages.h"
 #include "PackageArguments.h"
@@ -14,6 +16,7 @@
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/Format.h>
 #include <eacp/Core/Utils/Strings.h>
+#include <eacp/Core/Utils/TemporaryFile.h>
 
 #include <algorithm>
 #include <array>
@@ -28,74 +31,23 @@ namespace
 {
 constexpr auto bytesPerMebibyte = 1024.0 * 1024.0;
 constexpr auto statisticsLabelWidth = 14;
+constexpr auto statisticsLabelGap = 2;
 constexpr auto statisticsValueWidth = 10;
 constexpr auto millisecondsPerSecond = 1000.0;
 constexpr auto sendLogName = "send.log";
 constexpr auto sendFailureName = "send-failure.txt";
+constexpr auto msvcObjectOutputPrefixes =
+    std::array<std::string_view, 2> {"/Fo", "-Fo"};
+
+#if defined(_WIN32)
+constexpr auto arePathsCaseInsensitive = true;
+#else
+constexpr auto arePathsCaseInsensitive = false;
+#endif
 constexpr auto cacheSubcommandsHelp = std::string_view {
     "  lockstep cache stats   print the stored libraries, their size, hits, "
     "misses and stores\n"
     "  lockstep cache clear   delete the stored libraries and reset the counts"};
-constexpr auto stubDeclaration =
-    std::string_view {"typedef int lockstep_library_cache_stub;\n"};
-constexpr auto stubFileNames =
-    std::array<std::pair<std::string_view, std::string_view>, 2> {
-        {{"CXX", "stub.cpp"}, {"C", "stub.c"}}};
-constexpr auto linkingTargetTypes = std::array<std::string_view, 3> {
-    "EXECUTABLE", "SHARED_LIBRARY", "MODULE_LIBRARY"};
-
-struct LibraryDecision
-{
-    std::string target;
-    LibraryKey key;
-    std::optional<eacp::FilePath> cachedLibrary;
-    bool isFetched = false;
-};
-
-struct SkippedLibrary
-{
-    std::string target;
-    std::string reason;
-};
-
-struct LibraryCachePlan
-{
-    std::vector<LibraryDecision> libraries;
-    std::vector<SkippedLibrary> skipped;
-};
-
-eacp::FilePath getLibraryCacheDirectory(const eacp::FilePath& buildDirectory)
-{
-    return buildDirectory / "_lockstep" / "library-cache";
-}
-
-eacp::FilePath getInputsPath(const eacp::FilePath& buildDirectory,
-                             const std::string& key)
-{
-    return getLibraryCacheDirectory(buildDirectory) / "inputs" / (key + ".txt");
-}
-
-eacp::FilePath getStubPath(const eacp::FilePath& buildDirectory,
-                           const std::string& language)
-{
-    for (const auto& [stubLanguage, fileName]: stubFileNames)
-    {
-        if (stubLanguage == language)
-            return getLibraryCacheDirectory(buildDirectory) / fileName;
-    }
-
-    throw std::runtime_error("the library cache has no stub source for " + language);
-}
-
-// Rewritten only when it changes, so no stub object is rebuilt for nothing.
-void writeFileIfChanged(const eacp::FilePath& path, std::string_view text)
-{
-    if (eacp::Files::isFile(path) && eacp::Files::readFile(path) == text)
-        return;
-
-    eacp::Files::createDirectories(path.parentDirectory());
-    eacp::Files::writeFile(path, text);
-}
 
 eacp::FilePath getSendLogPath(const eacp::FilePath& buildDirectory)
 {
@@ -105,11 +57,6 @@ eacp::FilePath getSendLogPath(const eacp::FilePath& buildDirectory)
 eacp::FilePath getSendFailurePath(const eacp::FilePath& buildDirectory)
 {
     return getLibraryCacheDirectory(buildDirectory) / sendFailureName;
-}
-
-std::string quoteForShell(const std::string& text)
-{
-    return "\"" + text + "\"";
 }
 
 std::vector<ConfiguredPackage> findConfiguredPackages(const CommandOptions& options)
@@ -147,76 +94,6 @@ PackageVariableNames collectVariableNamesOfCachedPackages(
     return names;
 }
 
-bool isPackageStaticLibrary(const LibraryCacheInputs& inputs,
-                            const RecordFields& fields)
-{
-    return findField(fields, "TYPE") == "STATIC_LIBRARY"
-           && !isCMakeTrue(findField(fields, "IMPORTED"))
-           && findOwningPackage(inputs.packages, findField(fields, "SOURCE_DIR"));
-}
-
-LibraryCachePlan planLibraryCache(const LibraryCacheInputs& inputs,
-                                  const LibraryStore& store)
-{
-    auto plan = LibraryCachePlan {};
-
-    for (const auto& [target, fields]: inputs.description.targets)
-    {
-        if (!isPackageStaticLibrary(inputs, fields))
-            continue;
-
-        if (auto reason = findReasonNotToCache(inputs, target))
-        {
-            plan.skipped.push_back({target, *reason});
-            continue;
-        }
-
-        auto key = computeLibraryKey(inputs, target);
-        plan.libraries.push_back({target, key, store.findLibrary(key.key)});
-    }
-
-    return plan;
-}
-
-std::string getLockstepExecutable()
-{
-    auto executable = eacp::getEnvValue("LOCKSTEP_EXECUTABLE");
-
-    if (executable.empty())
-        throw std::runtime_error(
-            "the library cache runs from the CMake module, which sets "
-            "LOCKSTEP_EXECUTABLE");
-
-    return executable;
-}
-
-// The options every library cache command the build runs takes.
-eacp::Vector<std::string> createSharedArguments(const CommandOptions& options)
-{
-    auto arguments =
-        eacp::Vector<std::string> {"--cache=" + options.cache.str(),
-                                   "--build-dir=" + options.buildDirectory.str(),
-                                   "--cmake=" + options.cmake.str()};
-
-    if (!options.libraryCacheLocation.empty())
-        arguments.add("--library-cache-location=" + options.libraryCacheLocation);
-
-    return arguments;
-}
-
-std::string createLauncher(const CommandOptions& options, std::string_view command)
-{
-    auto executable = getLockstepExecutable();
-    auto launcher = quoteForShell(options.cmake.str()) + " -E env "
-                    + quoteForShell("LOCKSTEP_EXECUTABLE=" + executable) + " "
-                    + quoteForShell(executable);
-
-    for (const auto& argument: createSharedArguments(options))
-        launcher += " " + quoteForShell(argument);
-
-    return launcher + " " + std::string {command};
-}
-
 // Sending runs in a process of its own that outlives the link or configure that
 // started it, so neither waits on the network.
 void startSendingLibraries(const CommandOptions& options,
@@ -240,107 +117,6 @@ void startSendingLibraries(const CommandOptions& options,
     eacp::Processes::Process {process};
 }
 
-std::string createPropertySetting(const std::string& target,
-                                  std::string_view property,
-                                  const std::string& value)
-{
-    return "set_property(TARGET " + quoteForCMake(target) + " PROPERTY "
-           + std::string {property} + " " + value + ")\n";
-}
-
-// The target compiles one empty stub instead of its sources, and its archive
-// step copies the cached library into place instead of archiving the stub.
-std::string createHitSnippet(const CommandOptions& options,
-                             const ConfigureDescription& description,
-                             const LibraryDecision& decision)
-{
-    const auto& fields = description.targets.at(decision.target);
-    auto kept = findField(fields, "KEPT_SOURCES");
-    auto stub =
-        getStubPath(options.buildDirectory, findField(fields, "STUB_LANGUAGE"));
-    auto sources = quoteForCMake(stub.str());
-
-    if (!kept.empty())
-        sources = quoteForCMake(kept) + " " + sources;
-
-    auto launcher =
-        createLauncher(options, "use-cached-library") + " "
-        + quoteForShell("--library=" + decision.cachedLibrary->str()) + " "
-        + quoteForShell("--output=$<TARGET_FILE:" + decision.target + ">") + " --";
-
-    return createPropertySetting(decision.target, "SOURCES", sources)
-           + createPropertySetting(
-               decision.target, "RULE_LAUNCH_LINK", quoteForCMake(launcher));
-}
-
-bool isLinkingTarget(const RecordFields& fields)
-{
-    auto type = findField(fields, "TYPE");
-    return std::ranges::find(linkingTargetTypes, type) != linkingTargetTypes.end()
-           && !isCMakeTrue(findField(fields, "IMPORTED"));
-}
-
-// Every executable or shared library that links a missed library stores it
-// once its own link succeeds, so only what a build really linked is stored.
-std::string createStoringSnippet(const CommandOptions& options,
-                                 const ConfigureDescription& description,
-                                 const LibraryCachePlan& plan)
-{
-    auto snippet = std::string {};
-
-    for (const auto& [target, fields]: description.targets)
-    {
-        if (!isLinkingTarget(fields))
-            continue;
-
-        auto closure = collectLinkClosure(description, target);
-        auto libraries = std::string {};
-
-        for (const auto& decision: plan.libraries)
-        {
-            if (!decision.cachedLibrary && closure.contains(decision.target))
-                libraries +=
-                    " "
-                    + quoteForShell("--library=" + decision.key.key
-                                    + "=$<TARGET_FILE:" + decision.target + ">");
-        }
-
-        if (libraries.empty())
-            continue;
-
-        auto launcher = createLauncher(options, "store-libraries") + libraries
-                        + " -- " + findField(fields, "EXISTING_LINK_LAUNCHER");
-        snippet += createPropertySetting(
-            target, "RULE_LAUNCH_LINK", quoteForCMake(launcher));
-    }
-
-    return snippet;
-}
-
-std::string createMessage(std::string_view level, const std::string& text)
-{
-    return "message(" + std::string {level} + " "
-           + quoteForCMake("lockstep: " + text) + ")\n";
-}
-
-LibraryCacheStatistics countHitsAndMisses(const LibraryCachePlan& plan)
-{
-    auto counts = LibraryCacheStatistics {};
-
-    for (const auto& decision: plan.libraries)
-    {
-        if (decision.cachedLibrary)
-            ++counts.hits;
-        else
-            ++counts.misses;
-
-        if (decision.isFetched)
-            ++counts.fetchedHits;
-    }
-
-    return counts;
-}
-
 std::string describeSeconds(std::chrono::steady_clock::duration duration)
 {
     auto milliseconds =
@@ -353,9 +129,9 @@ LibraryFetchRequest createFetchRequest(const LibraryCachePlan& plan)
 {
     auto request = LibraryFetchRequest {};
 
-    for (const auto& decision: plan.libraries)
+    for (const auto& decision: plan.decisions)
     {
-        if (decision.cachedLibrary)
+        if (decision.cached)
             request.copiedKeys.push_back(decision.key.key);
         else
             request.missingKeys.push_back(decision.key.key);
@@ -368,28 +144,28 @@ void markFetchedLibraries(LibraryCachePlan& plan,
                           const LibraryFetchResult& fetched,
                           const LibraryStore& store)
 {
-    for (auto& decision: plan.libraries)
+    for (auto& decision: plan.decisions)
     {
         if (!fetched.fetchedKeys.contains(decision.key.key))
             continue;
 
-        decision.cachedLibrary = store.findLibrary(decision.key.key);
-        decision.isFetched = decision.cachedLibrary.has_value();
+        decision.cached = findEntryOfKind(store, decision.key.key, decision.kind);
+        decision.isFetched = decision.cached.has_value();
     }
 }
 
 std::string
     describeDiscardedLibraries(const LibraryCacheLocation& location,
-                               const std::vector<DiscardedLibrary>& discarded)
+                               const std::vector<DiscardedLibrary>& discarded,
+                               const std::string& entries)
 {
     auto descriptions = eacp::Vector<std::string> {};
 
     for (const auto& library: discarded)
         descriptions.add(library.key + " (" + library.reason + ")");
 
-    return "discarded " + std::to_string(discarded.size())
-           + " libraries fetched from " + location.text
-           + ", which build from source instead: "
+    return "discarded " + std::to_string(discarded.size()) + " " + entries
+           + " fetched from " + location.text + ", which build from source instead: "
            + eacp::Strings::join(descriptions, "; ");
 }
 
@@ -424,6 +200,7 @@ std::string fetchFromLibraryCacheLocation(const CommandOptions& options,
 
     auto report = reportEarlierSendFailure(options);
     auto request = createFetchRequest(plan);
+    auto entries = describeEntriesInPlural(plan);
     auto started = std::chrono::steady_clock::now();
 
     try
@@ -435,7 +212,8 @@ std::string fetchFromLibraryCacheLocation(const CommandOptions& options,
 
         if (!fetched.discarded.empty())
             report += createMessage(
-                "WARNING", describeDiscardedLibraries(*location, fetched.discarded));
+                "WARNING",
+                describeDiscardedLibraries(*location, fetched.discarded, entries));
 
         startSendingLibraries(options, fetched.keysLocationLacks);
         return report
@@ -443,8 +221,8 @@ std::string fetchFromLibraryCacheLocation(const CommandOptions& options,
                    "STATUS",
                    "library cache at " + location->text + ": fetched "
                        + std::to_string(fetched.fetchedKeys.size()) + " of the "
-                       + std::to_string(request.missingKeys.size())
-                       + " libraries this machine had no copy of in "
+                       + std::to_string(request.missingKeys.size()) + " " + entries
+                       + " this machine had no copy of in "
                        + describeSeconds(std::chrono::steady_clock::now() - started)
                        + "; sending "
                        + std::to_string(fetched.keysLocationLacks.size())
@@ -461,56 +239,6 @@ std::string fetchFromLibraryCacheLocation(const CommandOptions& options,
     }
 }
 
-std::string createReport(const LibraryCachePlan& plan)
-{
-    auto report = std::string {};
-
-    for (const auto& decision: plan.libraries)
-    {
-        if (decision.cachedLibrary)
-        {
-            auto source =
-                decision.isFetched ? std::string {", fetched"} : std::string {};
-            report += createMessage("VERBOSE",
-                                    "library cache hit for " + decision.target + " ("
-                                        + decision.key.key + source + ")");
-        }
-        else
-        {
-            report += createMessage(
-                "VERBOSE",
-                "library cache miss for " + decision.target + " (" + decision.key.key
-                    + "); the first link that uses it stores it");
-        }
-    }
-
-    for (const auto& skipped: plan.skipped)
-        report += createMessage("VERBOSE",
-                                "library cache skips " + skipped.target + ": "
-                                    + skipped.reason);
-
-    auto counts = countHitsAndMisses(plan);
-    return report
-           + createMessage("STATUS",
-                           "library cache: " + std::to_string(counts.hits)
-                               + " hits, " + std::to_string(counts.misses)
-                               + " misses, " + std::to_string(plan.skipped.size())
-                               + " skipped (--log-level=VERBOSE names them)");
-}
-
-void writeLibraryCacheFiles(const CommandOptions& options,
-                            const LibraryCachePlan& plan)
-{
-    for (const auto& [language, fileName]: stubFileNames)
-        writeFileIfChanged(getLibraryCacheDirectory(options.buildDirectory)
-                               / fileName,
-                           stubDeclaration);
-
-    for (const auto& decision: plan.libraries)
-        writeFileIfChanged(getInputsPath(options.buildDirectory, decision.key.key),
-                           decision.key.inputs);
-}
-
 void addToStatisticsOrWarn(const LibraryStore& store,
                            const LibraryCacheStatistics& added)
 {
@@ -525,48 +253,245 @@ void addToStatisticsOrWarn(const LibraryStore& store,
     }
 }
 
-void storeLinkedLibraries(const CommandOptions& options,
-                          const std::vector<std::string>& command)
+// A --library, --executable or --object-library value: <key>=<what to store>.
+struct KeyedValue
+{
+    std::string key;
+    std::string value;
+};
+
+KeyedValue splitKeyedValue(const std::string& text, std::string_view option)
+{
+    if (text.size() <= libraryKeyLength || text[libraryKeyLength] != '=')
+        throw std::runtime_error("store-libraries takes " + std::string {option}
+                                 + "=<key>=<file>, not " + text);
+
+    return {text.substr(0, libraryKeyLength), text.substr(libraryKeyLength + 1)};
+}
+
+struct EntryFromLink
+{
+    std::string key;
+    EntryToStore entry;
+};
+
+std::vector<eacp::FilePath> toFilePaths(const std::vector<std::string>& paths)
+{
+    auto filePaths = std::vector<eacp::FilePath> {};
+
+    for (const auto& path: paths)
+        filePaths.emplace_back(path);
+
+    return filePaths;
+}
+
+// Whether a link command read a file, as a path or through a response file.
+class LinkCommandInputs
+{
+public:
+    explicit LinkCommandInputs(const std::vector<std::string>& commandToRead)
+        : command(commandToRead)
+        , workingDirectory(std::filesystem::current_path())
+    {
+    }
+
+    bool isRead(const eacp::FilePath& file) const
+    {
+        return isCommandInput(command, file, workingDirectory);
+    }
+
+private:
+    const std::vector<std::string>& command;
+    eacp::FilePath workingDirectory;
+};
+
+void addLinkedLibraries(std::vector<EntryFromLink>& entries,
+                        const CommandOptions& options,
+                        const LinkCommandInputs& inputs)
+{
+    for (const auto& text: options.libraries)
+    {
+        auto [key, path] = splitKeyedValue(text, "--library");
+        auto library = eacp::FilePath {path};
+
+        if (inputs.isRead(library))
+            entries.push_back(
+                {key, {CachedTargetKind::staticLibrary, {library}, {}}});
+    }
+}
+
+void addLinkedExecutables(std::vector<EntryFromLink>& entries,
+                          const CommandOptions& options)
+{
+    for (const auto& text: options.executables)
+    {
+        auto [key, path] = splitKeyedValue(text, "--executable");
+        entries.push_back(
+            {key, {CachedTargetKind::executable, {eacp::FilePath {path}}, {}}});
+    }
+}
+
+// An object library is stored only when the link read every one of its
+// objects, so each was built for this link.
+void addLinkedObjectLibraries(std::vector<EntryFromLink>& entries,
+                              const CommandOptions& options,
+                              const LinkCommandInputs& inputs)
+{
+    auto isRead = [&](const eacp::FilePath& object)
+    { return inputs.isRead(object); };
+
+    for (const auto& text: options.objectLibraries)
+    {
+        auto [key, list] = splitKeyedValue(text, "--object-library");
+        auto objects = toFilePaths(splitCMakeList(list));
+
+        if (!objects.empty() && std::ranges::all_of(objects, isRead))
+            entries.push_back({key, {CachedTargetKind::objectLibrary, objects, {}}});
+    }
+}
+
+// What a link that succeeded stores: the libraries and object files its
+// command read, and the executable it wrote.
+std::vector<EntryFromLink>
+    collectEntriesFromLink(const CommandOptions& options,
+                           const std::vector<std::string>& command)
+{
+    auto inputs = LinkCommandInputs {command};
+    auto entries = std::vector<EntryFromLink> {};
+    addLinkedLibraries(entries, options, inputs);
+    addLinkedExecutables(entries, options);
+    addLinkedObjectLibraries(entries, options, inputs);
+    return entries;
+}
+
+void storeLinkedEntries(const CommandOptions& options,
+                        const std::vector<std::string>& command)
 {
     auto store = LibraryStore {options.cache};
-    auto workingDirectory = eacp::FilePath {std::filesystem::current_path()};
     auto stored = LibraryCacheStatistics {};
     auto storedKeys = std::vector<std::string> {};
 
-    for (const auto& entry: options.libraries)
+    for (auto& [key, entry]: collectEntriesFromLink(options, command))
     {
-        if (entry.size() <= libraryKeyLength || entry[libraryKeyLength] != '=')
-            throw std::runtime_error(
-                "store-libraries takes --library=<key>=<library>, not " + entry);
-
-        auto key = entry.substr(0, libraryKeyLength);
-        auto library = eacp::FilePath {entry.substr(libraryKeyLength + 1)};
-
-        if (!isCommandInput(command, library, workingDirectory))
-            continue;
-
         try
         {
-            auto inputs =
+            entry.inputs =
                 eacp::Files::readFile(getInputsPath(options.buildDirectory, key));
 
-            if (store.storeLibrary(key, library, inputs))
+            if (store.storeEntry(key, entry))
             {
-                ++stored.stores;
+                ++stored.getCounts(entry.kind).stores;
                 storedKeys.push_back(key);
             }
         }
         catch (const std::exception& error)
         {
-            printStatus("WARNING: could not store " + library.str()
+            printStatus("WARNING: could not store " + entry.files.front().str()
                         + " in the library cache: " + error.what());
         }
     }
 
-    if (stored.stores > 0)
+    if (!storedKeys.empty())
         addToStatisticsOrWarn(store, stored);
 
     startSendingLibraries(options, storedKeys);
+}
+
+int runWrappedCommand(const std::vector<std::string>& command,
+                      std::string_view runner)
+{
+    if (command.empty())
+        throw std::runtime_error(std::string {runner}
+                                 + " runs the command after --, and none was given");
+
+    auto process = eacp::Processes::ProcessOptions {};
+    process.executable = command.front();
+    process.arguments.getVector().assign(command.begin() + 1, command.end());
+    process.captureOutput = false;
+    auto result = eacp::Processes::run(process);
+
+    if (!result.launched)
+        throw std::runtime_error(std::string {runner} + " could not run "
+                                 + command.front());
+
+    return result.exitCode;
+}
+
+// Copies beside `destination` and renames the copy over it, so a file that ran
+// before is replaced rather than rewritten in place: macOS kills a process
+// whose signed executable changed under it.
+void copyIntoPlace(const eacp::FilePath& stored, const eacp::FilePath& destination)
+{
+    if (!eacp::Files::isFile(stored))
+    {
+        throw std::runtime_error(formatUserError(
+            "the cached file " + stored.str() + " is gone from the cache.",
+            "Configure again, and lockstep builds it from source."));
+    }
+
+    eacp::Files::createDirectories(destination.parentDirectory());
+    auto copy =
+        eacp::TemporaryFile {destination.parentDirectory(), ".lockstep-copy"};
+
+    if (!eacp::Files::copyFile(stored, copy.path())
+        || !renameAtAnyLength(copy.path(), destination))
+        throw std::runtime_error("cannot copy " + stored.str() + " to "
+                                 + destination.str());
+}
+
+// The object file a compile command writes: after -o, or in /Fo<file> or
+// -Fo<file> for MSVC. NMake passes them in a response file, which the caller
+// expands.
+std::optional<std::string> findCompileOutput(const std::vector<std::string>& command)
+{
+    for (auto index = std::size_t {0}; index < command.size(); ++index)
+    {
+        const auto& argument = command[index];
+
+        if (argument == "-o" && index + 1 < command.size())
+            return command[index + 1];
+
+        for (auto prefix: msvcObjectOutputPrefixes)
+        {
+            if (argument.starts_with(prefix) && argument.size() > prefix.size())
+                return argument.substr(prefix.size());
+        }
+    }
+
+    return std::nullopt;
+}
+
+// The path as one spelling, so a relative path from the compile command and an
+// absolute one from $<TARGET_OBJECTS:...> compare equal.
+std::string getComparablePath(const std::string& path)
+{
+    auto absolute = std::filesystem::absolute(std::filesystem::path {path});
+    auto error = std::error_code {};
+    auto resolved = std::filesystem::weakly_canonical(absolute, error);
+
+    if (error)
+        resolved = absolute.lexically_normal();
+
+    auto text = resolved.generic_string();
+
+    if (arePathsCaseInsensitive)
+        return toUpperCase(text);
+
+    return text;
+}
+
+std::optional<std::size_t> findObjectIndex(const std::vector<std::string>& objects,
+                                           const std::string& output)
+{
+    auto comparableOutput = getComparablePath(output);
+
+    for (auto index = std::size_t {0}; index < objects.size(); ++index)
+    {
+        if (getComparablePath(objects[index]) == comparableOutput)
+            return index;
+    }
+
+    return std::nullopt;
 }
 
 std::string formatMebibytes(std::uint64_t byteCount)
@@ -590,35 +515,144 @@ struct StatisticsLine
     std::string meaning;
 };
 
+// What a hit, a store and a miss nobody stored mean for one kind of entry.
+struct CountMeanings
+{
+    std::string_view hit;
+    std::string_view miss;
+    std::string_view stored;
+    std::string_view notStored;
+};
+
+const CountMeanings& findCountMeanings(CachedTargetKind kind)
+{
+    static const auto staticLibrary = CountMeanings {
+        "a configure found the library stored, so it was not built",
+        "a configure did not find the library stored:",
+        "built, then stored by the first link that used it",
+        "no link used it: the project does not build it, or has not built yet"};
+    static const auto executable = CountMeanings {
+        "a configure found the executable stored, so it was copied, not built",
+        "a configure did not find the executable stored:",
+        "built, then stored by its own link",
+        "not linked: the project does not build it, or has not built yet"};
+    static const auto objectLibrary = CountMeanings {
+        "a configure found the object files stored, so they were copied, not "
+        "compiled",
+        "a configure did not find the object files stored:",
+        "compiled, then stored by the first link that used them",
+        "no link used them: the project does not build them, or has not built yet"};
+
+    if (kind == CachedTargetKind::executable)
+        return executable;
+
+    if (kind == CachedTargetKind::objectLibrary)
+        return objectLibrary;
+
+    return staticLibrary;
+}
+
+// Indented under the kind's own line, except for static libraries, whose
+// lines stand as they did before the cache stored other kinds.
+std::vector<StatisticsLine> createCountLines(CachedTargetKind kind,
+                                             const LibraryCacheCounts& counts,
+                                             bool hasLocation,
+                                             const std::string& indent)
+{
+    const auto& meanings = findCountMeanings(kind);
+    auto missesNotStored = std::max(0, counts.misses - counts.stores);
+    auto lines = std::vector<StatisticsLine> {
+        {indent + "hits", std::to_string(counts.hits), std::string {meanings.hit}}};
+
+    if (hasLocation || counts.fetchedHits > 0)
+        lines.push_back({indent + "  fetched",
+                         std::to_string(counts.fetchedHits),
+                         "copied from the library cache location, which had it"});
+
+    lines.insert(lines.end(),
+                 {{indent + "misses",
+                   std::to_string(counts.misses),
+                   std::string {meanings.miss}},
+                  {indent + "  stored",
+                   std::to_string(counts.stores),
+                   std::string {meanings.stored}},
+                  {indent + "  not stored",
+                   std::to_string(missesNotStored),
+                   std::string {meanings.notStored}}});
+    return lines;
+}
+
+int countStored(const LibraryStoreSummary& summary, CachedTargetKind kind)
+{
+    auto found = summary.entryCounts.find(kind);
+
+    if (found == summary.entryCounts.end())
+        return 0;
+
+    return found->second;
+}
+
+bool hasAnythingToShow(const LibraryStoreSummary& summary, CachedTargetKind kind)
+{
+    const auto& counts = summary.statistics.getCounts(kind);
+    return countStored(summary, kind) > 0 || counts.hits > 0 || counts.misses > 0;
+}
+
+// The kinds other than static libraries that have anything stored or counted.
+std::vector<CachedTargetKind>
+    findOtherKindsToShow(const LibraryStoreSummary& summary)
+{
+    auto kinds = std::vector<CachedTargetKind> {};
+
+    for (auto kind: getEveryCachedTargetKind())
+    {
+        if (kind != CachedTargetKind::staticLibrary
+            && hasAnythingToShow(summary, kind))
+            kinds.push_back(kind);
+    }
+
+    return kinds;
+}
+
 std::vector<StatisticsLine> createStatisticsLines(const LibraryStoreSummary& summary,
                                                   bool hasLocation)
 {
-    const auto& statistics = summary.statistics;
-    auto missesNotStored = std::max(0, statistics.misses - statistics.stores);
+    constexpr auto staticLibrary = CachedTargetKind::staticLibrary;
+    auto otherKinds = findOtherKindsToShow(summary);
+    auto staticLabel = otherKinds.empty() ? "libraries" : "static libraries";
     auto lines = std::vector<StatisticsLine> {
-        {"libraries", std::to_string(summary.libraryCount), "stored now"},
-        {"size", formatMebibytes(summary.byteCount), "on disk"},
-        {"hits",
-         std::to_string(statistics.hits),
-         "a configure found the library stored, so it was not built"}};
+        {staticLabel,
+         std::to_string(countStored(summary, staticLibrary)),
+         "stored now"},
+        {"size", formatMebibytes(summary.byteCount), "on disk"}};
+    auto addLines = [&](const std::vector<StatisticsLine>& added)
+    { lines.insert(lines.end(), added.begin(), added.end()); };
 
-    if (hasLocation || statistics.fetchedHits > 0)
-        lines.push_back({"  fetched",
-                         std::to_string(statistics.fetchedHits),
-                         "copied from the library cache location, which had it"});
+    addLines(createCountLines(staticLibrary,
+                              summary.statistics.getCounts(staticLibrary),
+                              hasLocation,
+                              {}));
 
-    lines.insert(
-        lines.end(),
-        {{"misses",
-          std::to_string(statistics.misses),
-          "a configure did not find the library stored:"},
-         {"  stored",
-          std::to_string(statistics.stores),
-          "built, then stored by the first link that used it"},
-         {"  not stored",
-          std::to_string(missesNotStored),
-          "no link used it: the project does not build it, or has not built yet"}});
+    for (auto kind: otherKinds)
+    {
+        lines.push_back({getCachedTargetKindPluralName(kind),
+                         std::to_string(countStored(summary, kind)),
+                         "stored now"});
+        addLines(createCountLines(
+            kind, summary.statistics.getCounts(kind), hasLocation, "  "));
+    }
+
     return lines;
+}
+
+std::size_t findLabelWidth(const std::vector<StatisticsLine>& lines)
+{
+    auto width = std::size_t {statisticsLabelWidth};
+
+    for (const auto& line: lines)
+        width = std::max(width, line.label.size() + statisticsLabelGap);
+
+    return width;
 }
 
 void printStoreSummary(const CommandOptions& options)
@@ -632,17 +666,21 @@ void printStoreSummary(const CommandOptions& options)
     else
         eacp::Console::print("library cache " + copies);
 
-    for (const auto& line: createStatisticsLines(
-             LibraryStore {options.cache}.summarize(), hasLocation))
+    auto lines =
+        createStatisticsLines(LibraryStore {options.cache}.summarize(), hasLocation);
+    auto labelWidth = findLabelWidth(lines);
+
+    for (const auto& line: lines)
     {
         eacp::Console::print(eacp::Strings::format("  {:<{}}{:<{}}{}",
                                                    line.label,
-                                                   statisticsLabelWidth,
+                                                   labelWidth,
                                                    line.value,
                                                    statisticsValueWidth,
                                                    line.meaning));
     }
 }
+
 std::string describeClearedStore(const CommandOptions& options)
 {
     auto copies = (options.cache / "lib").str();
@@ -672,15 +710,7 @@ int runLibraryCacheCommand(const CommandOptions& options)
     auto plan = planLibraryCache(inputs, store);
     auto locationReport = fetchFromLibraryCacheLocation(options, plan, store);
     addToStatisticsOrWarn(store, countHitsAndMisses(plan));
-    auto snippet = std::string {};
-
-    for (const auto& decision: plan.libraries)
-    {
-        if (decision.cachedLibrary)
-            snippet += createHitSnippet(options, description, decision);
-    }
-
-    snippet += createStoringSnippet(options, description, plan);
+    auto snippet = createPlanSnippet(options, description, plan);
     writeLibraryCacheFiles(options, plan);
     eacp::Files::createDirectories(options.output.parentDirectory());
     eacp::Files::writeFile(
@@ -694,19 +724,26 @@ int runUseCachedLibraryCommand(const CommandOptions& options)
     if (options.libraries.size() != 1)
         throw std::runtime_error("use-cached-library takes one --library");
 
-    auto library = eacp::FilePath {options.libraries[0]};
+    copyIntoPlace(eacp::FilePath {options.libraries[0]}, options.output);
+    return 0;
+}
 
-    if (!eacp::Files::isFile(library))
-    {
-        throw std::runtime_error(formatUserError(
-            "the cached library " + library.str() + " is gone from the cache.",
-            "Configure again, and lockstep builds it from source."));
-    }
+int runUseCachedObjectsCommand(const CommandOptions& options)
+{
+    const auto& command = options.argumentsAfterSeparator;
+    auto objects = splitCMakeList(options.objects);
+    auto workingDirectory = eacp::FilePath {std::filesystem::current_path()};
+    auto output = findCompileOutput(expandResponseFiles(command, workingDirectory));
+    auto index = output ? findObjectIndex(objects, *output) : std::nullopt;
+    auto isStoredInSameOrder = objects.size() == options.storedObjects.size();
 
-    if (!eacp::Files::copyFile(library, options.output))
-        throw std::runtime_error("cannot copy " + library.str() + " to "
-                                 + options.output.str());
+    // A compile that writes none of the stored objects, such as a precompiled
+    // header's, runs as it is.
+    if (!index || !isStoredInSameOrder)
+        return runWrappedCommand(command, "use-cached-objects");
 
+    copyIntoPlace(eacp::FilePath {options.storedObjects[*index]},
+                  eacp::FilePath {*output});
     return 0;
 }
 
@@ -714,24 +751,10 @@ int runStoreLibrariesCommand(const CommandOptions& options)
 {
     const auto& command = options.argumentsAfterSeparator;
 
-    if (command.empty())
-        throw std::runtime_error(
-            "store-libraries runs the command after --, and none "
-            "was given");
+    if (auto exitCode = runWrappedCommand(command, "store-libraries"); exitCode != 0)
+        return exitCode;
 
-    auto process = eacp::Processes::ProcessOptions {};
-    process.executable = command.front();
-    process.arguments.getVector().assign(command.begin() + 1, command.end());
-    process.captureOutput = false;
-    auto result = eacp::Processes::run(process);
-
-    if (!result.launched)
-        throw std::runtime_error("store-libraries could not run " + command.front());
-
-    if (result.exitCode != 0)
-        return result.exitCode;
-
-    storeLinkedLibraries(options, command);
+    storeLinkedEntries(options, command);
     return 0;
 }
 
