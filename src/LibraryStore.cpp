@@ -5,6 +5,7 @@
 
 #include <eacp/Core/Utils/File.h>
 #include <eacp/Core/Utils/Files.h>
+#include <eacp/Core/Utils/StdPath.h>
 #include <eacp/Core/Utils/Strings.h>
 #include <eacp/Core/Utils/TemporaryFile.h>
 
@@ -26,6 +27,8 @@ namespace
 {
 constexpr auto manifestName = "manifest";
 constexpr auto statisticsName = "statistics";
+constexpr auto usedMarkersName = "used";
+constexpr auto publishAttempts = 3;
 constexpr auto manifestIndent = 2;
 
 using CountsMember = LibraryCacheCounts LibraryCacheStatistics::*;
@@ -165,6 +168,26 @@ CountsMember findCountsMember(CachedTargetKind kind)
     throw std::logic_error("the library cache counts no such kind of entry");
 }
 
+// Renames the staged entry into place. An eviction can delete the key's
+// directory once its last build is gone, between this making it and the
+// rename, so a rename that finds no directory makes it again and retries.
+bool publishStagedEntry(const eacp::FilePath& staging,
+                        const eacp::FilePath& destination)
+{
+    for (auto attempt = 0; attempt < publishAttempts; ++attempt)
+    {
+        eacp::Files::createDirectories(destination.parentDirectory());
+
+        if (renameAtAnyLength(staging, destination))
+            return true;
+
+        if (eacp::Files::isDirectory(destination.parentDirectory()))
+            return false;
+    }
+
+    return false;
+}
+
 // Object files of different sources can share a file name, so each is stored
 // under its place in the list.
 std::string getStoredFileName(CachedTargetKind kind,
@@ -253,6 +276,9 @@ void addStatistics(LibraryCacheStatistics& total,
         counts.fetchedHits += addedCounts.fetchedHits;
         counts.otherToolchainHits += addedCounts.otherToolchainHits;
     }
+
+    total.evictions += added.evictions;
+    total.locationEvictions += added.locationEvictions;
 }
 
 const std::vector<CachedTargetKind>& getEveryCachedTargetKind()
@@ -350,16 +376,97 @@ bool LibraryStore::storeEntry(const std::string& key,
     }
 
     writeManifest(staging.path(), manifest);
-    eacp::Files::createDirectories(destination.parentDirectory());
 
-    if (renameAtAnyLength(staging.path(), destination))
+    if (publishStagedEntry(staging.path(), destination))
+    {
+        markUsed(address);
         return true;
+    }
 
     if (!eacp::Files::isDirectory(destination))
         throw std::runtime_error("cannot move the stored entry into "
                                  + destination.str());
 
+    markUsed(address);
     return false;
+}
+
+void LibraryStore::markUsed(const EntryAddress& address) const
+{
+    auto marker = getUsedMarkerPath(address);
+    auto error = std::error_code {};
+    auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(eacp::toStdPath(marker), now, error);
+
+    if (!error)
+        return;
+
+    eacp::Files::createDirectories(marker.parentDirectory());
+    eacp::Files::writeFile(marker, std::string_view {});
+}
+
+std::filesystem::file_time_type
+    LibraryStore::findLastUse(const EntryAddress& address) const
+{
+    auto error = std::error_code {};
+    auto time = std::filesystem::last_write_time(
+        eacp::toStdPath(getUsedMarkerPath(address)), error);
+
+    if (!error)
+        return time;
+
+    auto manifest = getLibraryManifestPath(getEntryDirectory(address));
+    time = std::filesystem::last_write_time(eacp::toStdPath(manifest), error);
+
+    if (!error)
+        return time;
+
+    return std::filesystem::file_time_type::min();
+}
+
+std::vector<EntryAddress> LibraryStore::listEveryBuild() const
+{
+    auto addresses = std::vector<EntryAddress> {};
+
+    for (const auto& key: listKeyNamedDirectories(root))
+    {
+        for (const auto& build: listKeyNamedDirectories(key))
+            addresses.push_back({key.fileName(), build.fileName()});
+    }
+
+    return addresses;
+}
+
+std::uint64_t LibraryStore::measureEntry(const EntryAddress& address) const
+{
+    auto options = eacp::Files::DirectoryOptions {};
+    options.recursive = true;
+    options.includeHidden = true;
+    auto bytes = std::uint64_t {0};
+
+    for (const auto& file:
+         eacp::Files::listFiles(getEntryDirectory(address), options))
+        bytes += eacp::File {file}.size();
+
+    return bytes;
+}
+
+bool LibraryStore::evictEntry(const EntryAddress& address) const
+{
+    auto directory = getEntryDirectory(address);
+
+    if (!eacp::Files::isDirectory(directory) || deleteEntry(directory))
+        return false;
+
+    eacp::Files::removeFile(getUsedMarkerPath(address));
+    auto error = std::error_code {};
+    std::filesystem::remove(eacp::toStdPath(directory.parentDirectory()), error);
+    return true;
+}
+
+eacp::FilePath LibraryStore::getUsedMarkerPath(const EntryAddress& address) const
+{
+    return root / usedMarkersName / (address.key + "." + address.buildId);
 }
 
 void LibraryStore::addToStatistics(const LibraryCacheStatistics& added) const

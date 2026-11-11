@@ -1,9 +1,11 @@
 #pragma once
 
+#include "LibraryEviction.h"
 #include "LibraryStore.h"
 
 #include <eacp/Core/Utils/FilePath.h>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
@@ -81,7 +83,8 @@ public:
                            const eacp::FilePath& cmake,
                            const std::string& sshExecutable = defaultSshExecutable);
 
-    // One round trip: copies every missing build the location holds (and,
+    // One round trip: marks every build it asks about that the location holds
+    // used there, copies every missing build the location holds (and,
     // when the request says so, the other builds of a missing key) into
     // `localCopies`, after checking each against its manifest, and learns
     // which copied builds the location lacks. Throws when the location cannot
@@ -90,9 +93,13 @@ public:
                                       const LibraryStore& localCopies) const;
 
     // Copies the builds from `localCopies` to the location, each published
-    // whole under its key. Throws when the location cannot be reached.
-    void sendLibraries(const std::vector<EntryAddress>& addresses,
-                       const LibraryStore& localCopies) const;
+    // whole under its key and marked used, then evicts the least recently used
+    // there while the location takes more than `locationLimit` (see
+    // evictLeastRecentlyUsed). Returns how many it evicted. Throws when the
+    // location cannot be reached.
+    int sendLibraries(const std::vector<EntryAddress>& addresses,
+                      const LibraryStore& localCopies,
+                      const EvictionLimit& locationLimit) const;
 
     const LibraryCacheLocation& getLocation() const { return location; }
 

@@ -1,7 +1,7 @@
 lockstep_add_package(NAME NanoTest GITHUB eyalamirmusic/NanoTest GIT_TAG main)
 
 nano_add_executable(LockstepTests
-        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp ExecutableCacheTests.cpp ToolchainRangeTests.cpp CompilerExecutableTests.cpp LocationOverSshTests.cpp ProjectSettingsTests.cpp
+        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp ExecutableCacheTests.cpp ToolchainRangeTests.cpp CompilerExecutableTests.cpp LocationOverSshTests.cpp ProjectSettingsTests.cpp EvictionTests.cpp
         TARGETS lockstep-lib
         NO_MAIN)
 target_compile_definitions(LockstepTests PRIVATE

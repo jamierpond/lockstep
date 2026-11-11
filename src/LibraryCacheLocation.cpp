@@ -1,4 +1,5 @@
 #include "LibraryCacheLocation.h"
+#include "LibraryEviction.h"
 #include "Sha256.h"
 
 #include <eacp/Core/Process/Process.h>
@@ -25,45 +26,89 @@ constexpr auto processPollInterval = std::chrono::milliseconds {20};
 constexpr auto driveLetterLength = std::size_t {1};
 constexpr auto homeDirectoryPrefix = std::string_view {"~/"};
 constexpr auto lacksMarker = std::string_view {"lockstep-location-lacks "};
+constexpr auto evictedMarker = std::string_view {"lockstep-location-evicted "};
+constexpr auto bytesPerKibibyte = std::uint64_t {1024};
 constexpr auto fetchedArchiveName = "fetched.tar";
+
+// Defined for each script below: marks a <key>/<build id> used, by touching
+// used/<key>.<build id>, as LibraryStore::markUsed does.
+constexpr auto markUsedFunction = std::string_view {
+    "mark_used() { touch \"used/${1%/*}.${1#*/}\" 2>/dev/null; }; "};
 
 // Run by the host's sh with the format directory as $1 and, as $2, 1 when every
 // build of a missing key is wanted where the one asked for is not there. It
 // reads "missing <key> <build id>" and "copied <key> <build id>" lines, writes a
-// tar of every missing build it holds to stdout and names every copied build
-// it lacks on stderr.
+// tar of every missing build it holds to stdout, names every copied build it
+// lacks on stderr, and marks every build it holds of either used.
 constexpr auto fetchScript = std::string_view {
-    "if cd \"$1\" 2>/dev/null; then held=1; else held=0; fi; others=$2; found=; "
+    "if cd \"$1\" 2>/dev/null; then held=1; mkdir -p used 2>/dev/null; "
+    "else held=0; fi; others=$2; found=; "
     "while read kind key build; do "
     "if [ $held = 1 ] && [ -f \"$key/$build/manifest.json\" ]; then "
+    "mark_used \"$key/$build\"; "
     "if [ \"$kind\" = missing ]; then found=\"$found $key/$build\"; fi; "
     "elif [ \"$kind\" = copied ]; then "
     "echo \"lockstep-location-lacks $key/$build\" >&2; "
     "elif [ $held = 1 ] && [ \"$others\" = 1 ] && [ -d \"$key\" ]; then "
     "for entry in \"$key\"/*; do "
-    "if [ -f \"$entry/manifest.json\" ]; then found=\"$found $entry\"; fi; "
+    "if [ -f \"$entry/manifest.json\" ]; then "
+    "mark_used \"$entry\"; found=\"$found $entry\"; fi; "
     "done; "
     "fi; "
     "done; "
     "if [ -n \"$found\" ]; then COPYFILE_DISABLE=1 exec tar -cf - $found; fi"};
 
-// Run by the host's sh with the format directory as $1 and each build's
-// <key>/<build id> after it, reading a tar of them. Each is unpacked beside the
-// entries under a random name and renamed into place, so a half-sent build is
-// never seen; when another machine published it first, its copy stays, and a
-// rename that lost that race, which mv puts inside the winner, is deleted.
+// Run by the host's sh with the format directory as $1, the size limit in KiB
+// as $2, the minutes after its last use an entry is protected as $3 and each
+// build's <key>/<build id> after them, reading a tar of them. Each is unpacked
+// beside the entries under a random name and renamed into place, so a
+// half-sent build is never seen; when another machine published it first, its
+// copy stays, and a rename that lost that race, which mv puts inside the
+// winner, is deleted. Each is marked used.
+//
+// Then, when the directory takes more than the limit (du -sk), it deletes the
+// least recently used builds, oldest marker first (ls -tr used), until it fits,
+// stopping at one used within the protected minutes (find -mmin). A build
+// without a marker gets one with its manifest's time first. Each build is
+// moved aside before it is deleted, so a fetch never sees half of one, and two
+// hosts' sends evicting at once each delete what they moved. It names how many
+// it deleted on stderr.
 constexpr auto sendScript = std::string_view {
     "mkdir -p \"$1\" && cd \"$1\" || exit 1; "
+    "limit=$2; protected_minutes=$3; shift 3; "
+    "mkdir -p used || exit 1; "
     "staging=$(mktemp -d .staging.XXXXXX) || exit 1; "
     "if ! tar -xf - -C \"$staging\"; then rm -rf \"$staging\"; exit 1; fi; "
-    "shift; status=0; "
+    "status=0; "
     "for entry do "
     "if [ ! -d \"$entry\" ]; then "
     "mkdir -p \"${entry%/*}\" && mv \"$staging/$entry\" \"$entry\" 2>/dev/null; fi; "
     "if [ -d \"$entry/${entry#*/}\" ]; then rm -rf \"$entry/${entry#*/}\"; fi; "
-    "if [ ! -f \"$entry/manifest.json\" ]; then status=1; fi; "
+    "if [ -f \"$entry/manifest.json\" ]; then mark_used \"$entry\"; else status=1; fi; "
     "done; "
-    "rm -rf \"$staging\"; exit $status"};
+    "rm -rf \"$staging\"; "
+    "total=$(du -sk . | cut -f1); evicted=0; "
+    "if [ \"$total\" -gt \"$limit\" ]; then "
+    "for manifest in */*/manifest.json; do "
+    "if [ -f \"$manifest\" ]; then entry=${manifest%/manifest.json}; "
+    "marker=\"used/${entry%/*}.${entry#*/}\"; "
+    "if [ ! -f \"$marker\" ]; then touch -r \"$manifest\" \"$marker\"; fi; fi; "
+    "done; "
+    "for marker in $(ls -tr used); do "
+    "if [ \"$total\" -le \"$limit\" ]; then break; fi; "
+    "if [ -n \"$(find \"used/$marker\" -mmin -\"$protected_minutes\")\" ]; then break; fi; "
+    "entry=\"${marker%.*}/${marker#*.}\"; "
+    "if [ -d \"$entry\" ]; then "
+    "size=$(du -sk \"$entry\" | cut -f1); doomed=\".evicting.$$.$marker\"; "
+    "if mv \"$entry\" \"$doomed\" 2>/dev/null; then "
+    "rm -rf \"$doomed\"; evicted=$((evicted + 1)); fi; "
+    "total=$((total - size)); rmdir \"${entry%/*}\" 2>/dev/null; "
+    "fi; "
+    "rm -f \"used/$marker\"; "
+    "done; "
+    "fi; "
+    "echo \"lockstep-location-evicted $evicted\" >&2; "
+    "exit $status"};
 
 // One of the scripts above, run on the host with the arguments after the format
 // directory and `input` on its stdin.
@@ -125,6 +170,7 @@ FinishedProcess runWithTimeLimit(eacp::Processes::ProcessOptions options,
 struct SshErrorOutput
 {
     std::vector<EntryAddress> locationLacks;
+    int evictedCount = 0;
     eacp::Vector<std::string> otherLines;
 };
 
@@ -140,7 +186,10 @@ SshErrorOutput parseErrorOutput(const FinishedProcess& finished)
         if (trimmed.starts_with(lacksMarker))
             lacked = parseEntryAddress(trimmed.substr(lacksMarker.size()));
 
-        if (lacked)
+        if (trimmed.starts_with(evictedMarker))
+            parsed.evictedCount =
+                eacp::Strings::parseIntOr(trimmed.substr(evictedMarker.size()), 0);
+        else if (lacked)
             parsed.locationLacks.push_back(*lacked);
         else if (!trimmed.empty())
             parsed.otherLines.add(trimmed);
@@ -283,8 +332,10 @@ public:
         fetch(const LibraryFetchRequest& request,
               const eacp::FilePath& destination) const = 0;
 
-    virtual void send(const std::vector<EntryAddress>& addresses,
-                      const LibraryStore& localCopies) const = 0;
+    // Returns how many builds it evicted at the location.
+    virtual int send(const std::vector<EntryAddress>& addresses,
+                     const LibraryStore& localCopies,
+                     const EvictionLimit& limit) const = 0;
 };
 
 namespace
@@ -301,45 +352,61 @@ public:
                                     const eacp::FilePath& destination) const override
     {
         for (const auto& address: request.missing)
-            copyMissingBuild(address, request.fetchesOtherBuilds, destination);
+            copyMissingBuild(address, request, destination);
 
         auto lacks = std::vector<EntryAddress> {};
-        auto isLacked = [&](const EntryAddress& address)
-        { return !store.findEntry(address); };
-        std::ranges::copy_if(request.copied, std::back_inserter(lacks), isLacked);
+
+        for (const auto& address: request.copied)
+        {
+            if (store.findEntry(address))
+                store.markUsed(address);
+            else
+                lacks.push_back(address);
+        }
+
         return lacks;
     }
 
-    void send(const std::vector<EntryAddress>& addresses,
-              const LibraryStore& localCopies) const override
+    int send(const std::vector<EntryAddress>& addresses,
+             const LibraryStore& localCopies,
+             const EvictionLimit& limit) const override
     {
         for (const auto& address: addresses)
         {
             if (auto stored = localCopies.findEntry(address))
                 store.storeEntry(address.key, createEntryToStore(*stored));
         }
+
+        return evictLeastRecentlyUsed(store, limit).evictedCount;
     }
 
 private:
     void copyMissingBuild(const EntryAddress& address,
-                          bool fetchesOtherBuilds,
+                          const LibraryFetchRequest& request,
                           const eacp::FilePath& destination) const
     {
         if (auto stored = store.findEntry(address))
             copyEntry(*stored, destination);
-        else if (fetchesOtherBuilds)
-            copyEveryBuild(address.key, destination);
+        else if (request.fetchesOtherBuilds)
+            copyEveryBuild(address, destination);
     }
 
-    void copyEveryBuild(const std::string& key,
+    void copyEntry(const StoredEntry& stored,
+                   const eacp::FilePath& destination) const
+    {
+        store.markUsed(stored.address);
+        copyEntryFiles(stored, destination);
+    }
+
+    void copyEveryBuild(const EntryAddress& address,
                         const eacp::FilePath& destination) const
     {
-        for (const auto& stored: store.listBuilds(key))
+        for (const auto& stored: store.listBuilds(address.key))
             copyEntry(stored, destination);
     }
 
-    static void copyEntry(const StoredEntry& stored,
-                          const eacp::FilePath& destination)
+    static void copyEntryFiles(const StoredEntry& stored,
+                               const eacp::FilePath& destination)
     {
         auto copy = destination / stored.address.key / stored.address.buildId;
         auto isCopied = eacp::Files::copyFile(
@@ -397,8 +464,9 @@ public:
         return parseErrorOutput(finished).locationLacks;
     }
 
-    void send(const std::vector<EntryAddress>& addresses,
-              const LibraryStore& localCopies) const override
+    int send(const std::vector<EntryAddress>& addresses,
+             const LibraryStore& localCopies,
+             const EvictionLimit& limit) const override
     {
         // tar runs in a copy outside the cache: Windows cannot delete a
         // directory a running process works in, so `lockstep cache clear`
@@ -407,26 +475,34 @@ public:
         eacp::Files::createDirectories(staging.path());
         auto archive = eacp::TemporaryFile {".tar"};
         auto arguments = eacp::Vector<std::string> {"cf", archive.path().str()};
-        auto paths = std::vector<std::string> {};
+        auto limitKibibytes =
+            (limit.maximumBytes + bytesPerKibibyte - 1) / bytesPerKibibyte;
+        auto protectedMinutes =
+            std::chrono::duration_cast<std::chrono::minutes>(evictionProtection);
+        auto scriptArguments =
+            std::vector<std::string> {std::to_string(limitKibibytes),
+                                      std::to_string(protectedMinutes.count())};
 
         for (const auto& address: addresses)
         {
             copyEntryOutOfStore(localCopies, address, staging.path());
             arguments.add(address.getPath());
-            paths.push_back(address.getPath());
+            scriptArguments.push_back(address.getPath());
         }
 
         runCMakeTar(cmake, arguments, staging.path());
-        runSsh({sendScript,
-                paths,
-                eacp::Files::readFile(archive.path()),
-                sendTimeLimit});
+        auto finished = runSsh({sendScript,
+                                scriptArguments,
+                                eacp::Files::readFile(archive.path()),
+                                sendTimeLimit});
+        return parseErrorOutput(finished).evictedCount;
     }
 
 private:
     FinishedProcess runSsh(const SshScriptRun& run) const
     {
-        auto commandOnHost = "sh -c '" + std::string {run.script} + "' lockstep '"
+        auto commandOnHost = "sh -c '" + std::string {markUsedFunction}
+                             + std::string {run.script} + "' lockstep '"
                              + formatDirectory + "'";
 
         for (const auto& argument: run.arguments)
@@ -548,11 +624,13 @@ LibraryFetchResult
     return result;
 }
 
-void LibraryCacheAtLocation::sendLibraries(
-    const std::vector<EntryAddress>& addresses,
-    const LibraryStore& localCopies) const
+int LibraryCacheAtLocation::sendLibraries(const std::vector<EntryAddress>& addresses,
+                                          const LibraryStore& localCopies,
+                                          const EvictionLimit& locationLimit) const
 {
-    if (!addresses.empty())
-        transport->send(addresses, localCopies);
+    if (addresses.empty())
+        return 0;
+
+    return transport->send(addresses, localCopies, locationLimit);
 }
 } // namespace lockstep

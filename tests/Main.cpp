@@ -2,6 +2,7 @@
 #include "FakeTools.h"
 #include "LibrarySender.h"
 #include "StatisticsWriter.h"
+#include "StoreEvictor.h"
 
 #include <NanoTest/NanoTest.h>
 
@@ -12,7 +13,8 @@
 namespace
 {
 constexpr auto statisticsWriterArgumentCount = 3;
-constexpr auto librarySenderArgumentCount = 5;
+constexpr auto librarySenderArgumentCount = 6;
+constexpr auto storeEvictorArgumentCount = 4;
 
 bool isRunAs(std::span<char*> arguments, std::string_view mode, int argumentCount)
 {
@@ -48,7 +50,11 @@ int main(int argc, char* argv[])
         return runStatisticsWriter(arguments[2]);
 
     if (isRunAs(arguments, librarySenderArgument, librarySenderArgumentCount))
-        return runLibrarySender({arguments[2], arguments[3], arguments[4]});
+        return runLibrarySender(
+            {arguments[2], arguments[3], arguments[4], arguments[5]});
+
+    if (isRunAs(arguments, storeEvictorArgument, storeEvictorArgumentCount))
+        return runStoreEvictor(arguments[2], arguments[3]);
 
     if (auto exitCode = runAsFakeTool(arguments))
         return *exitCode;

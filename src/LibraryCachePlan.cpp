@@ -578,6 +578,13 @@ eacp::Vector<std::string> createSharedArguments(const CommandOptions& options)
     if (!options.libraryCacheLocation.empty())
         arguments.add("--library-cache-location=" + options.libraryCacheLocation);
 
+    if (!options.libraryCacheMaxSize.empty())
+        arguments.add("--library-cache-max-size=" + options.libraryCacheMaxSize);
+
+    if (!options.libraryCacheLocationMaxSize.empty())
+        arguments.add("--library-cache-location-max-size="
+                      + options.libraryCacheLocationMaxSize);
+
     return arguments;
 }
 

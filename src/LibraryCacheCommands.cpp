@@ -1,7 +1,9 @@
+#include "ByteSize.h"
 #include "CMakeSnippet.h"
 #include "Commands.h"
 #include "CompilerExecutable.h"
 #include "LibraryCacheSettings.h"
+#include "LibraryEviction.h"
 #include "LibraryCache.h"
 #include "LibraryCacheLocation.h"
 #include "LibraryCachePlan.h"
@@ -259,6 +261,68 @@ void addToStatisticsOrWarn(const LibraryStore& store,
     }
 }
 
+// The limits the configure passed, or the defaults for a build directory a
+// configure set up without them.
+LibraryCacheSizeLimits getSizeLimits(const CommandOptions& options)
+{
+    auto limits = parseSizeLimits(resolveLibraryCacheSettings({}));
+
+    if (!options.libraryCacheMaxSize.empty())
+        limits.localBytes = parseByteSize(options.libraryCacheMaxSize);
+
+    if (!options.libraryCacheLocationMaxSize.empty())
+        limits.locationBytes = parseByteSize(options.libraryCacheLocationMaxSize);
+
+    return limits;
+}
+
+// A copy out of <store>/<key>/<build id>/ marks that entry used.
+void markStoredFileUsed(const CommandOptions& options, const eacp::FilePath& stored)
+{
+    auto build = stored.parentDirectory();
+    auto address = parseEntryAddress(build.parentDirectory().fileName() + "/"
+                                     + build.fileName());
+
+    if (address)
+        LibraryStore {options.cache}.markUsed(*address);
+}
+
+void markHitsUsed(const LibraryStore& store, const LibraryCachePlan& plan)
+{
+    for (const auto& decision: plan.decisions)
+    {
+        if (decision.cached)
+            store.markUsed(decision.cached->address);
+    }
+}
+
+// Evicts what the limit says and counts it. Returns the line that says so, or
+// nothing when nothing went.
+std::string evictFromStore(const LibraryStore& store, std::uint64_t limitBytes)
+{
+    auto result = evictLeastRecentlyUsed(store, {limitBytes});
+
+    if (result.evictedCount == 0)
+        return {};
+
+    auto evicted = LibraryCacheStatistics {};
+    evicted.evictions = result.evictedCount;
+    addToStatisticsOrWarn(store, evicted);
+    return "library cache: deleted the " + std::to_string(result.evictedCount)
+           + " least recently used entries to stay under its "
+           + describeByteSize(limitBytes) + " limit";
+}
+
+void countLocationEvictions(const LibraryStore& store, int evictedCount)
+{
+    if (evictedCount == 0)
+        return;
+
+    auto evicted = LibraryCacheStatistics {};
+    evicted.locationEvictions = evictedCount;
+    addToStatisticsOrWarn(store, evicted);
+}
+
 // A --library, --executable or --object-library value: <key>=<what to store>.
 struct KeyedValue
 {
@@ -407,6 +471,9 @@ void storeLinkedEntries(const CommandOptions& options,
     if (!storedAddresses.empty())
         addToStatisticsOrWarn(store, stored);
 
+    if (auto evicted = evictFromStore(store, getSizeLimits(options).localBytes);
+        !evicted.empty())
+        printStatus(evicted);
     startSendingLibraries(options, storedAddresses);
 }
 
@@ -671,6 +738,31 @@ void printLines(const std::vector<StatisticsLine>& lines)
     }
 }
 
+std::vector<StatisticsLine>
+    createLimitLines(const LibraryCacheStatistics& statistics,
+                     const LibraryCacheSizeLimits& limits,
+                     bool hasLocation)
+{
+    auto lines = std::vector<StatisticsLine> {
+        {"limit",
+         describeByteSize(limits.localBytes),
+         "past it, the entries unused for longest are deleted"},
+        {"evictions",
+         std::to_string(statistics.evictions),
+         "entries deleted to stay under the limit"}};
+
+    if (hasLocation)
+        lines.insert(lines.end(),
+                     {{"location limit",
+                       describeByteSize(limits.locationBytes),
+                       "the same, at the location"},
+                      {"location evictions",
+                       std::to_string(statistics.locationEvictions),
+                       "entries this machine's sends deleted there"}});
+
+    return lines;
+}
+
 void printStoreSummary(const CommandOptions& options)
 {
     auto copies = (options.cache / "lib").str();
@@ -682,8 +774,12 @@ void printStoreSummary(const CommandOptions& options)
     else
         eacp::Console::print("library cache " + copies);
 
-    printLines(createStatisticsLines(LibraryStore {options.cache}.summarize(),
-                                     hasLocation));
+    auto summary = LibraryStore {options.cache}.summarize();
+    auto lines = createStatisticsLines(summary, hasLocation);
+    auto limitLines =
+        createLimitLines(summary.statistics, getSizeLimits(options), hasLocation);
+    lines.insert(lines.end(), limitLines.begin(), limitLines.end());
+    printLines(lines);
 }
 
 struct SettingsInForce
@@ -755,8 +851,11 @@ int runLibraryCacheCommand(const CommandOptions& commandOptions)
         createSettingSources(commandOptions.cacheVariables,
                              commandOptions.settingEnvironment,
                              getProjectSettingsPath(commandOptions.lock)));
+    auto limits = parseSizeLimits(settings);
     auto options = commandOptions;
     options.libraryCacheLocation = settings.location.text;
+    options.libraryCacheMaxSize = std::to_string(limits.localBytes);
+    options.libraryCacheLocationMaxSize = std::to_string(limits.locationBytes);
     auto description =
         parseConfigureDescription(eacp::Files::readFile(options.input));
     auto packages = findConfiguredPackages(options);
@@ -773,13 +872,18 @@ int runLibraryCacheCommand(const CommandOptions& commandOptions)
         LibraryCachePlanning {inputs, store, parseToolchainRanges(settings)};
     auto plan = planLibraryCache(planning);
     auto locationReport = fetchFromLibraryCacheLocation(options, plan, planning);
+    markHitsUsed(store, plan);
+    auto evictionReport = std::string {};
+
+    if (auto evicted = evictFromStore(store, limits.localBytes); !evicted.empty())
+        evictionReport = createMessage("STATUS", evicted);
     addToStatisticsOrWarn(store, countHitsAndMisses(plan));
     auto snippet = createPlanSnippet(options, description, plan);
     writeLibraryCacheFiles(options, plan);
     eacp::Files::createDirectories(options.output.parentDirectory());
-    eacp::Files::writeFile(
-        options.output,
-        std::string_view {snippet + locationReport + createReport(plan)});
+    eacp::Files::writeFile(options.output,
+                           std::string_view {snippet + locationReport
+                                             + createReport(plan) + evictionReport});
     return 0;
 }
 
@@ -788,7 +892,9 @@ int runUseCachedLibraryCommand(const CommandOptions& options)
     if (options.libraries.size() != 1)
         throw std::runtime_error("use-cached-library takes one --library");
 
-    copyIntoPlace(eacp::FilePath {options.libraries[0]}, options.output);
+    auto stored = eacp::FilePath {options.libraries[0]};
+    copyIntoPlace(stored, options.output);
+    markStoredFileUsed(options, stored);
     return 0;
 }
 
@@ -809,8 +915,9 @@ int runUseCachedObjectsCommand(const CommandOptions& options)
         return runWrappedCommand(command, "use-cached-objects");
     }
 
-    copyIntoPlace(eacp::FilePath {options.storedObjects[*index]},
-                  eacp::FilePath {options.object});
+    auto stored = eacp::FilePath {options.storedObjects[*index]};
+    copyIntoPlace(stored, eacp::FilePath {options.object});
+    markStoredFileUsed(options, stored);
     return 0;
 }
 
@@ -861,10 +968,14 @@ int runSendLibrariesCommand(const CommandOptions& options)
 
     try
     {
-        LibraryCacheAtLocation {*location, options.cmake}.sendLibraries(
-            keys, LibraryStore {options.cache});
+        auto local = LibraryStore {options.cache};
+        auto evicted =
+            LibraryCacheAtLocation {*location, options.cmake}.sendLibraries(
+                keys, local, {getSizeLimits(options).locationBytes});
         printStatus("sent " + std::to_string(keys.size()) + " libraries to "
-                    + location->text);
+                    + location->text + "; evicted " + std::to_string(evicted)
+                    + " there to stay under its size limit");
+        countLocationEvictions(local, evicted);
         return 0;
     }
     catch (const std::exception& error)
@@ -881,7 +992,10 @@ int runCacheCommand(const CommandOptions& commandOptions)
 {
     auto inForce = findSettingsInForce(commandOptions);
     auto options = commandOptions;
+    auto limits = parseSizeLimits(inForce.settings);
     options.libraryCacheLocation = inForce.settings.location.text;
+    options.libraryCacheMaxSize = std::to_string(limits.localBytes);
+    options.libraryCacheLocationMaxSize = std::to_string(limits.locationBytes);
     auto subcommand = options.names.empty() ? std::string {} : options.names[0];
 
     if (subcommand == "stats" && options.names.size() == 1)

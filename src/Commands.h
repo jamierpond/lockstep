@@ -49,6 +49,10 @@ struct CommandOptions
     std::string object;
     // LOCKSTEP_LIBRARY_CACHE_LOCATION: a directory or [user@]host:directory.
     std::string libraryCacheLocation;
+    // The size limits in bytes of this machine's library cache and of the
+    // location, which the configure passes to the commands the build runs.
+    std::string libraryCacheMaxSize;
+    std::string libraryCacheLocationMaxSize;
     // <name>=<value> of every library cache setting defined as a cache variable
     // on the build directory, even an empty one.
     eacp::Vector<std::string> cacheVariables;

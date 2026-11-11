@@ -8,6 +8,7 @@
 #include <LibraryCacheLocation.h>
 #include <LibraryCachePlan.h>
 #include <LibraryStore.h>
+#include <ByteSize.h>
 #include <Sha256.h>
 
 #include <NanoTest/NanoTest.h>
@@ -41,6 +42,7 @@ lockstep::EntryAddress addressOf(const std::string& key)
     return {key, plainBuildId};
 }
 constexpr auto fakeArchiverPatience = std::chrono::seconds {60};
+constexpr auto sizeNoTestReaches = std::string_view {"1 TiB"};
 constexpr auto filePollInterval = std::chrono::milliseconds {20};
 
 bool waitForFile(const eacp::FilePath& path)
@@ -847,27 +849,6 @@ SampleEntry createSampleEntry(std::string_view inputs)
     return {std::string {inputs}, lockstep::computeSha256Hex(inputs)};
 }
 
-auto tParsesLocation = test("LibraryCacheLocation/parsesDirectoryAndSshForms") = []
-{
-    using Kind = lockstep::LibraryCacheLocationKind;
-    auto ssh = lockstep::parseLibraryCacheLocation("jamie@tamby:.cache/libraries");
-    check(ssh && ssh->kind == Kind::ssh);
-    check(ssh && ssh->sshHost == "jamie@tamby"
-          && ssh->directory == ".cache/libraries");
-
-    auto home = lockstep::parseLibraryCacheLocation("tamby:");
-    check(home && home->kind == Kind::ssh && home->directory.empty());
-
-    for (auto directory: {"/mnt/share/libraries", "C:\\share", "C:/share", "share"})
-    {
-        auto parsed = lockstep::parseLibraryCacheLocation(directory);
-        check(parsed && parsed->kind == Kind::directory
-              && parsed->directory == directory);
-    }
-
-    check(!lockstep::parseLibraryCacheLocation(""));
-};
-
 auto tFetchesFromDirectory =
     test("LibraryCacheLocation/fetchesFromDirectoryAndNamesWhatItLacks") = []
 {
@@ -965,8 +946,8 @@ auto tSendsToDirectory = test("LibraryCacheLocation/sendsToDirectory") = []
     storeLibrary(local, entry.key, library, entry.inputs);
     auto cache = createCacheAtDirectory(directory / "location");
 
-    cache.sendLibraries({addressOf(entry.key)}, local);
-    cache.sendLibraries({addressOf(entry.key)}, local);
+    cache.sendLibraries({addressOf(entry.key)}, local, {unlimitedBytes});
+    cache.sendLibraries({addressOf(entry.key)}, local, {unlimitedBytes});
 
     auto sent =
         openStoreAtDirectory(directory / "location").findEntry(addressOf(entry.key));
@@ -992,7 +973,8 @@ auto tConcurrentSends =
         eacp::Vector<std::string> {std::string {librarySenderArgument},
                                    (directory / "cache").str(),
                                    (directory / "location").str(),
-                                   entry.key};
+                                   entry.key,
+                                   std::string {sizeNoTestReaches}};
     auto first = eacp::Processes::Process {testExecutablePath, senderArguments};
     auto second = eacp::Processes::Process {testExecutablePath, senderArguments};
 
@@ -1002,8 +984,17 @@ auto tConcurrentSends =
 
     auto location = openStoreAtDirectory(directory / "location");
     check(findLibrary(location, entry.key).has_value());
-    auto entries = eacp::Files::listDirectory(location.getFormatDirectory(), {});
-    check(entries.size() == 1);
+    auto isLeftOver = [](const eacp::Files::DirectoryEntry& entry)
+    {
+        auto name = entry.path.fileName();
+        return name != "used" && name.size() != lockstep::libraryKeyLength;
+    };
+    auto everyEntry = eacp::Files::DirectoryOptions {};
+    everyEntry.includeHidden = true;
+    check(std::ranges::none_of(
+        eacp::Files::listDirectory(location.getFormatDirectory(), everyEntry),
+        isLeftOver));
+    check(location.listBuilds(entry.key).size() == 1);
 };
 
 auto tClearDuringSend =
@@ -1027,7 +1018,7 @@ auto tClearDuringSend =
         try
         {
             lockstep::LibraryCacheAtLocation {location, fakeCMake}.sendLibraries(
-                {addressOf(entry.key)}, local);
+                {addressOf(entry.key)}, local, {unlimitedBytes});
         }
         catch (const std::exception&)
         {
@@ -1108,8 +1099,14 @@ int runFakeArchiver()
 int runLibrarySender(const LibrarySenderArguments& arguments)
 {
     auto local = lockstep::LibraryStore {eacp::FilePath {arguments.cacheDirectory}};
-    createCacheAtDirectory(eacp::FilePath {arguments.locationDirectory})
-        .sendLibraries({addressOf(std::string {arguments.key})}, local);
+    auto location = lockstep::LibraryCacheAtLocation {
+        *lockstep::parseLibraryCacheLocation(
+            std::string {arguments.locationDirectory}),
+        eacp::FilePath {"cmake"},
+        testExecutablePath};
+    location.sendLibraries({addressOf(std::string {arguments.key})},
+                           local,
+                           {lockstep::parseByteSize(arguments.limitBytes)});
     return 0;
 }
 

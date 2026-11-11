@@ -234,6 +234,14 @@ void addBehaviourOptions(eacp::Args::Parser& parser,
                   options.libraryCacheLocation,
                   "a directory or [user@]host:directory holding the library cache, "
                   "which the build passes on from LOCKSTEP_LIBRARY_CACHE_LOCATION");
+    parser.option("--library-cache-max-size",
+                  options.libraryCacheMaxSize,
+                  "the size in bytes this machine's library cache is kept under, "
+                  "for the commands the build runs");
+    parser.option("--library-cache-location-max-size",
+                  options.libraryCacheLocationMaxSize,
+                  "the size in bytes the library cache location is kept under, "
+                  "for send-libraries");
     parser.option("--cache-variable",
                   options.cacheVariables,
                   "<name>=<value> of a library cache setting the build directory "

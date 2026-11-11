@@ -146,6 +146,8 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp GIT_TAG main
 | `LOCKSTEP_LIBRARY_CACHE` | `ON` takes a package's static libraries, the executables it builds and its object libraries' object files from `<cache>/lib` when an earlier build built them from the same inputs, instead of building them again. Also an environment variable, which turns the cache on for every project; `-DLOCKSTEP_LIBRARY_CACHE=ON` or `OFF` on a build directory wins over it, and it wins over `enabled` in [lockstep.json](#lockstepjson). Default `OFF`; see [The library cache](#the-library-cache) |
 | `LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE` | Also take stored builds made by a compiler whose version is in this range, such as `>=21.0.0`. Also an environment variable and `compilerRange` in `lockstep.json`; a `-D` on a build directory wins over both, and an empty one turns the range off there. Unset, only this machine's own compiler's builds are taken; see [Builds by another compiler or SDK](#builds-by-another-compiler-or-sdk) |
 | `LOCKSTEP_LIBRARY_CACHE_SDK_RANGE` | The same for the Apple SDK that built a stored entry, such as `>=26.5`; `sdkRange` in `lockstep.json` |
+| `LOCKSTEP_LIBRARY_CACHE_MAX_SIZE` | The size `<cache>/lib` is kept under by deleting the least recently used entries, such as `10 GiB`. Default `5 GiB`. Also an environment variable and `maxSize` in `lockstep.json`; see [The size limit](#the-size-limit) |
+| `LOCKSTEP_LIBRARY_CACHE_LOCATION_MAX_SIZE` | The same for the library cache location. Default `20 GiB`; `locationMaxSize` in `lockstep.json` |
 | `LOCKSTEP_LIBRARY_CACHE_LOCATION` | Where the library cache is, so several machines share it: a directory, or `[user@]host:directory` on a Unix host reached over ssh. Also an environment variable; `-DLOCKSTEP_LIBRARY_CACHE_LOCATION=...` on a build directory wins over it, and an empty value turns it off there; `location` in `lockstep.json` comes after both. Unset, the library cache is `<cache>/lib` alone; see [One library cache for several machines](#one-library-cache-for-several-machines) |
 
 ### lockstep.json
@@ -524,8 +526,48 @@ compiles always keeps the path in its key.
 the location from the environment and from the `lockstep.json` of the project
 they run in. `cache stats` names the location, and counts under `fetched` the hits whose library came from it.
 `cache clear` deletes this machine's copies in `<cache>/lib` and their counts,
-and leaves every library at the location. Nothing deletes libraries from the
-location; to make room, delete its `format-<n>` directories on the host.
+and leaves every library at the location. The location is kept under its own
+size limit (see [The size limit](#the-size-limit)).
+
+### The size limit
+
+The library cache would grow forever, one entry for every set of inputs any
+build ever compiled. Each store is kept under a size limit instead: 5 GiB for
+this machine's `<cache>/lib` and 20 GiB at a location, as
+`LOCKSTEP_LIBRARY_CACHE_MAX_SIZE` and `LOCKSTEP_LIBRARY_CACHE_LOCATION_MAX_SIZE`
+(or `maxSize` and `locationMaxSize` in `lockstep.json`) set. A size is a number
+and a unit: `5 GiB`, `500 MB`, `1.5 TiB` or a plain number of bytes; KB, MB,
+GB and TB count in thousands, KiB, MiB, GiB and TiB in 1024s. Anything else, or
+zero, stops the configure with a message naming the setting.
+
+Every entry has a marker file, `format-<n>/used/<key>.<build id>`, whose time
+is when the entry was last used. A configure touches the marker of every entry
+it hits, a link touches the marker of each entry it stores, a copy into a build
+directory touches the marker of the entry it copies, and a fetch touches the
+markers at the location of every entry it asks about that the location holds.
+No library is rewritten to mark it.
+
+When a link stores an entry, or a configure fetches some, and the entries in
+`<cache>/lib` then take more than the limit, lockstep deletes whole entries,
+the one whose marker is oldest first, until they fit. It never deletes an entry
+used in the last hour: a configure marks every entry it hits, so the build it
+configured has an hour to copy them, and a store that has only recent entries
+stays over its limit until they age. An entry is moved out of its place before
+it is deleted, so no lookup finds half of one, and a second lockstep evicting
+at the same time deletes others or nothing; neither fails. Configure prints
+`lockstep: library cache: deleted the 3 least recently used entries to stay
+under its 5.0 GiB limit` when it deleted some.
+
+A send to a location does the same there with the location's limit, using only
+`sh`, `du`, `ls -tr`, `find -mmin`, `mv` and `rm` on the host: when the
+location's directory takes more than its limit it deletes the builds with the
+oldest markers first, never one used in the last hour. An entry another
+lockstep stored there without a marker gets one with its manifest's time
+first.
+
+`lockstep cache stats` prints the limit and the evictions under the counts, and
+with a location its limit and how many entries this machine's sends deleted
+there.
 
 ### The command line
 
@@ -550,6 +592,15 @@ library cache /home/you/.cache/lockstep/lib
   misses        62        a configure did not find the library stored:
     stored      13        built, then stored by the first link that used it
     not stored  49        no link used it: the project does not build it, or has not built yet
+  limit         5.0 GiB   past it, the entries unused for longest are deleted
+  evictions     0         entries deleted to stay under the limit
+settings here, and where each comes from (a -D on a build directory wins over them there)
+  LOCKSTEP_LIBRARY_CACHE                    ON        /home/you/app/lockstep.json
+  LOCKSTEP_LIBRARY_CACHE_LOCATION           (unset)   the default
+  LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE     >=21.0.0  the environment
+  LOCKSTEP_LIBRARY_CACHE_SDK_RANGE          (unset)   the default
+  LOCKSTEP_LIBRARY_CACHE_MAX_SIZE           5 GiB     the default
+  LOCKSTEP_LIBRARY_CACHE_LOCATION_MAX_SIZE  20 GiB    the default
 ```
 
 `libraries` counts the static libraries stored in `<cache>/lib`, `size` is every file
@@ -618,8 +669,7 @@ the same lock verifies on Windows.
 - Symlinks in a dependency hash differently on Windows when git checks them
   out as plain files.
 - A library cache location over ssh needs a Unix host; a Windows machine can
-  use one but not be one. lockstep never deletes libraries at a location, and a
-  send killed half-way leaves a staging directory, whose name starts with a
+  use one but not be one. A send killed half-way leaves a staging directory, whose name starts with a
   dot or ends in `.staging`, beside the entries, which no fetch reads.
 - A library fetched from another machine carries debug information that names
   that machine's build directory for headers generated in it, as a library

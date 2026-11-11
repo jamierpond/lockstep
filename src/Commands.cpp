@@ -628,7 +628,10 @@ void writeLibraryCacheSwitch(const CommandOptions& options)
                    + (isEnabled ? "ON" : "OFF") + ")\n";
 
     if (isEnabled)
+    {
         parseToolchainRanges(settings);
+        parseSizeLimits(settings);
+    }
 
     if (eacp::Files::isFile(settingsFile))
         snippet += "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "

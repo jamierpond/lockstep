@@ -1,4 +1,5 @@
 #include "LibraryCacheSettings.h"
+#include "ByteSize.h"
 #include "PackageArguments.h"
 #include "ProjectSettings.h"
 
@@ -58,6 +59,19 @@ std::optional<VersionRange> parseRangeSetting(const SettingValue& value,
     try
     {
         return parseVersionRange(value.text);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        throw std::runtime_error(std::string {variable} + " from "
+                                 + describeSettingSource(value.source) + ": "
+                                 + error.what());
+    }
+}
+std::uint64_t parseSizeSetting(const SettingValue& value, std::string_view variable)
+{
+    try
+    {
+        return parseByteSize(value.text);
     }
     catch (const std::invalid_argument& error)
     {
@@ -152,6 +166,13 @@ ToolchainRanges parseToolchainRanges(const LibraryCacheSettings& settings)
         parseRangeSetting(settings.compilerRange,
                           "LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE"),
         parseRangeSetting(settings.sdkRange, "LOCKSTEP_LIBRARY_CACHE_SDK_RANGE")};
+}
+
+LibraryCacheSizeLimits parseSizeLimits(const LibraryCacheSettings& settings)
+{
+    return {parseSizeSetting(settings.maxSize, "LOCKSTEP_LIBRARY_CACHE_MAX_SIZE"),
+            parseSizeSetting(settings.locationMaxSize,
+                             "LOCKSTEP_LIBRARY_CACHE_LOCATION_MAX_SIZE")};
 }
 
 std::string describeSettingSource(SettingSource source)

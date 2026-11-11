@@ -81,6 +81,18 @@ bool isLibraryCacheEnabled(const LibraryCacheSettings& settings);
 // range is not one.
 ToolchainRanges parseToolchainRanges(const LibraryCacheSettings& settings);
 
+// The library cache's size limits in bytes: this machine's store and the
+// location's.
+struct LibraryCacheSizeLimits
+{
+    std::uint64_t localBytes = 0;
+    std::uint64_t locationBytes = 0;
+};
+
+// Throws std::runtime_error naming the setting and where it came from when a
+// size is not one (see parseByteSize).
+LibraryCacheSizeLimits parseSizeLimits(const LibraryCacheSettings& settings);
+
 // "a -D on the build directory", "the environment", "lockstep.json" or "the
 // default".
 std::string describeSettingSource(SettingSource source);

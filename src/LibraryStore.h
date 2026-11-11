@@ -8,6 +8,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <string>
@@ -92,10 +93,16 @@ struct LibraryCacheStatistics
     LibraryCacheCounts executables;
     LibraryCacheCounts objectLibraries;
 
+    // Entries deleted to stay under the size limit: from this store, and from
+    // the library cache location by this machine's sends.
+    int evictions = 0;
+    int locationEvictions = 0;
+
     LibraryCacheCounts& getCounts(CachedTargetKind kind);
     const LibraryCacheCounts& getCounts(CachedTargetKind kind) const;
 
-    MIRO_REFLECT(staticLibraries, executables, objectLibraries)
+    MIRO_REFLECT(
+        staticLibraries, executables, objectLibraries, evictions, locationEvictions)
 };
 
 void addStatistics(LibraryCacheStatistics& total,
@@ -169,8 +176,29 @@ public:
     const eacp::FilePath& getFormatDirectory() const { return root; }
 
     // Copies the files in under `key` and the id of the entry's record,
-    // unless that build is there already. True when this call stored it.
+    // unless that build is there already, and marks it used. True when this
+    // call stored it.
     bool storeEntry(const std::string& key, const EntryToStore& entry) const;
+
+    // Sets the time the entry was last used to now, by touching its marker
+    // <store>/format-<version>/used/<key>.<build id>, so no large file is
+    // rewritten.
+    void markUsed(const EntryAddress& address) const;
+
+    // When the entry was last used: its marker's time, or its manifest's when
+    // it has no marker, such as an entry an older lockstep stored.
+    std::filesystem::file_time_type findLastUse(const EntryAddress& address) const;
+
+    // Every build of every key, whole or not.
+    std::vector<EntryAddress> listEveryBuild() const;
+
+    // Bytes of every file in the entry's directory.
+    std::uint64_t measureEntry(const EntryAddress& address) const;
+
+    // Moves the entry out of its place, so no lookup finds part of it, then
+    // deletes it and its marker. False when another process moved it first or
+    // it cannot be moved.
+    bool evictEntry(const EntryAddress& address) const;
 
     // Adds to the counts in statistics.json, which another lockstep may be
     // adding to at the same time. Keeps trying for 30 seconds, then throws.
@@ -185,6 +213,7 @@ public:
 
 private:
     eacp::FilePath getEntryDirectory(const EntryAddress& address) const;
+    eacp::FilePath getUsedMarkerPath(const EntryAddress& address) const;
 
     eacp::FilePath everyFormatRoot;
     eacp::FilePath root;

@@ -3,7 +3,12 @@
 #include <eacp/Core/Utils/FilePath.h>
 #include <eacp/Core/Utils/Files.h>
 
+#include <cstdint>
+#include <limits>
 #include <string>
+
+// A size limit no test store reaches, for tests about something else.
+constexpr auto unlimitedBytes = std::numeric_limits<std::uint64_t>::max();
 
 inline eacp::FilePath createEmptyTestDirectory(const std::string& name)
 {

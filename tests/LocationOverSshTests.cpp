@@ -78,6 +78,27 @@ lockstep::EntryAddress addressOf(const SampleBuilds& builds,
 
 using namespace LocationOverSshTests;
 
+auto tParsesLocation = test("LibraryCacheLocation/parsesDirectoryAndSshForms") = []
+{
+    using Kind = lockstep::LibraryCacheLocationKind;
+    auto ssh = lockstep::parseLibraryCacheLocation("jamie@tamby:.cache/libraries");
+    check(ssh && ssh->kind == Kind::ssh);
+    check(ssh && ssh->sshHost == "jamie@tamby"
+          && ssh->directory == ".cache/libraries");
+
+    auto home = lockstep::parseLibraryCacheLocation("tamby:");
+    check(home && home->kind == Kind::ssh && home->directory.empty());
+
+    for (auto directory: {"/mnt/share/libraries", "C:\\share", "C:/share", "share"})
+    {
+        auto parsed = lockstep::parseLibraryCacheLocation(directory);
+        check(parsed && parsed->kind == Kind::directory
+              && parsed->directory == directory);
+    }
+
+    check(!lockstep::parseLibraryCacheLocation(""));
+};
+
 #if !defined(_WIN32)
 auto tFetchesOwnBuild = test("LocationOverSsh/fetchesTheBuildAskedFor") = []
 {
@@ -136,8 +157,8 @@ auto tSends = test("LocationOverSsh/sendsBuildsBesideTheOnesThere") = []
     auto local = lockstep::LibraryStore {directory / "cache"};
     auto sent = storeBuild(local, builds, "21.0.0.2");
 
-    location.cache.sendLibraries({sent}, local);
-    location.cache.sendLibraries({sent}, local);
+    location.cache.sendLibraries({sent}, local, {unlimitedBytes});
+    location.cache.sendLibraries({sent}, local, {unlimitedBytes});
 
     check(location.store.findEntry(there).has_value());
     check(location.store.findEntry(sent).has_value());
