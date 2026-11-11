@@ -145,16 +145,6 @@ constexpr auto commandFunctions =
          {"send-libraries", lockstep::runSendLibrariesCommand},
          {machineWideCommand, lockstep::runCacheCommand}}};
 
-// The build passes the location its configure read; the cache commands, which
-// run outside any build, read the environment variable.
-std::string getLibraryCacheLocation(const lockstep::CommandOptions& options)
-{
-    if (options.command != machineWideCommand)
-        return options.libraryCacheLocation;
-
-    return eacp::getEnvValue("LOCKSTEP_LIBRARY_CACHE_LOCATION");
-}
-
 std::map<std::string, std::string> readSettingEnvironment()
 {
     auto environment = std::map<std::string, std::string> {};
@@ -169,7 +159,6 @@ int runCommand(lockstep::CommandOptions options)
 {
     options.cache = getCacheDirectory(options.cache);
     options.settingEnvironment = readSettingEnvironment();
-    options.libraryCacheLocation = getLibraryCacheLocation(options);
     options.lock = getLockFile(options);
 
     for (const auto& [name, function]: commandFunctions)

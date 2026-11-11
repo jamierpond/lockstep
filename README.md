@@ -143,10 +143,42 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp GIT_TAG main
 | `LOCKSTEP_CACHE` | The shared cache (also an environment variable). Default `~/.cache/lockstep`, `$XDG_CACHE_HOME/lockstep`, or `%LOCALAPPDATA%\lockstep` on Windows |
 | `LOCKSTEP_LOCK_FILE` | Default `<top-level source dir>/lockstep.lock` |
 | `LOCKSTEP_EXECUTABLE` | Run this `lockstep` binary instead of downloading the pinned release. The environment variable wins over the cached value |
-| `LOCKSTEP_LIBRARY_CACHE` | `ON` takes a package's static libraries, the executables it builds and its object libraries' object files from `<cache>/lib` when an earlier build built them from the same inputs, instead of building them again. Also an environment variable, which turns the cache on for every project; `-DLOCKSTEP_LIBRARY_CACHE=ON` or `OFF` on a build directory wins over it. Default `OFF`; see [The library cache](#the-library-cache) |
-| `LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE` | Also take stored builds made by a compiler whose version is in this range, such as `>=21.0.0`. Also an environment variable; a `-D` on a build directory wins over it, and an empty one turns the range off there. Unset, only this machine's own compiler's builds are taken; see [Builds by another compiler or SDK](#builds-by-another-compiler-or-sdk) |
-| `LOCKSTEP_LIBRARY_CACHE_SDK_RANGE` | The same for the Apple SDK that built a stored entry, such as `>=26.5` |
-| `LOCKSTEP_LIBRARY_CACHE_LOCATION` | Where the library cache is, so several machines share it: a directory, or `[user@]host:directory` on a Unix host reached over ssh. Also an environment variable; `-DLOCKSTEP_LIBRARY_CACHE_LOCATION=...` on a build directory wins over it, and an empty value turns it off there. Unset, the library cache is `<cache>/lib` alone; see [One library cache for several machines](#one-library-cache-for-several-machines) |
+| `LOCKSTEP_LIBRARY_CACHE` | `ON` takes a package's static libraries, the executables it builds and its object libraries' object files from `<cache>/lib` when an earlier build built them from the same inputs, instead of building them again. Also an environment variable, which turns the cache on for every project; `-DLOCKSTEP_LIBRARY_CACHE=ON` or `OFF` on a build directory wins over it, and it wins over `enabled` in [lockstep.json](#lockstepjson). Default `OFF`; see [The library cache](#the-library-cache) |
+| `LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE` | Also take stored builds made by a compiler whose version is in this range, such as `>=21.0.0`. Also an environment variable and `compilerRange` in `lockstep.json`; a `-D` on a build directory wins over both, and an empty one turns the range off there. Unset, only this machine's own compiler's builds are taken; see [Builds by another compiler or SDK](#builds-by-another-compiler-or-sdk) |
+| `LOCKSTEP_LIBRARY_CACHE_SDK_RANGE` | The same for the Apple SDK that built a stored entry, such as `>=26.5`; `sdkRange` in `lockstep.json` |
+| `LOCKSTEP_LIBRARY_CACHE_LOCATION` | Where the library cache is, so several machines share it: a directory, or `[user@]host:directory` on a Unix host reached over ssh. Also an environment variable; `-DLOCKSTEP_LIBRARY_CACHE_LOCATION=...` on a build directory wins over it, and an empty value turns it off there; `location` in `lockstep.json` comes after both. Unset, the library cache is `<cache>/lib` alone; see [One library cache for several machines](#one-library-cache-for-several-machines) |
+
+### lockstep.json
+
+`lockstep.json` holds a project's lockstep settings, committed beside
+`lockstep.lock`. It is read from the directory of the lock file in use, so with
+`LOCKSTEP_LOCK_FILE` pointing elsewhere it is the `lockstep.json` beside that
+file. No file changes nothing.
+
+```json
+{
+  "libraryCache": {
+    "enabled": true,
+    "location": "you@buildbox:.cache/lockstep-library-cache",
+    "compilerRange": ">=21.0.0",
+    "sdkRange": ">=26.5",
+    "maxSize": "5 GiB",
+    "locationMaxSize": "20 GiB"
+  }
+}
+```
+
+Each key is the setting of the same meaning in the table above:
+`enabled` is `LOCKSTEP_LIBRARY_CACHE` (`true` or `false`), `location`,
+`compilerRange`, `sdkRange`, `maxSize` and `locationMaxSize` are
+`LOCKSTEP_LIBRARY_CACHE_LOCATION`, `_COMPILER_RANGE`, `_SDK_RANGE`, `_MAX_SIZE`
+and `_LOCATION_MAX_SIZE`, all strings. Each setting comes from the first of: a
+`-D` on the build directory, the environment variable, `lockstep.json`, the
+default. A key lockstep does not know, or a value of the wrong type, stops the
+configure with a message naming the key and the file, as an unknown
+`lockstep_add_package` option does. A configure runs again when the file
+changes. `lockstep cache stats` run inside a project prints each setting, its
+value and where it came from (a build directory's `-D` is not visible there).
 
 ### The library cache
 
@@ -169,7 +201,9 @@ Nothing in a project changes, and a project's committed `cmake/lockstep.cmake`
 needs no update: the switch is read by the CMake module the binary writes.
 `-DLOCKSTEP_LIBRARY_CACHE=ON` or `-DLOCKSTEP_LIBRARY_CACHE=OFF` turns it on or
 off for one build directory, and wins over the environment variable for as
-long as it stays in that directory's `CMakeCache.txt`.
+long as it stays in that directory's `CMakeCache.txt`. To turn it on for
+everyone who builds a project, commit a `lockstep.json` (see
+[lockstep.json](#lockstepjson)).
 
 At the end of the configure, lockstep computes a key for each static library a
 locked package declares: a SHA-256 over the package's content hash, the
@@ -487,8 +521,8 @@ across paths. lockstep does not read MSVC's `/pathmap`, so a library MSVC
 compiles always keeps the path in its key.
 
 `lockstep cache stats` and `lockstep cache clear` read
-`LOCKSTEP_LIBRARY_CACHE_LOCATION` from the environment. `cache stats` names the
-location, and counts under `fetched` the hits whose library came from it.
+the location from the environment and from the `lockstep.json` of the project
+they run in. `cache stats` names the location, and counts under `fetched` the hits whose library came from it.
 `cache clear` deletes this machine's copies in `<cache>/lib` and their counts,
 and leaves every library at the location. Nothing deletes libraries from the
 location; to make room, delete its `format-<n>` directories on the host.

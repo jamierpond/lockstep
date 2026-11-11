@@ -1,9 +1,11 @@
 #include "Commands.h"
 #include "CMakeSnippet.h"
+#include "LibraryCacheSettings.h"
 #include "LockFile.h"
 #include "Messages.h"
 #include "PackageArguments.h"
 #include "PackageCache.h"
+#include "ProjectSettings.h"
 #include "Session.h"
 #include "Status.h"
 
@@ -612,6 +614,32 @@ SessionOverride parseOverride(const std::string& definition)
 
 namespace
 {
+// Whether the library cache is on, for the module to include its CMake, and
+// a reconfigure when lockstep.json changes. Stops the configure on a
+// lockstep.json lockstep cannot read, and, with the cache on, on a setting
+// that is not valid.
+void writeLibraryCacheSwitch(const CommandOptions& options)
+{
+    auto settingsFile = getProjectSettingsPath(options.lock);
+    auto settings = resolveLibraryCacheSettings(createSettingSources(
+        options.cacheVariables, options.settingEnvironment, settingsFile));
+    auto isEnabled = isLibraryCacheEnabled(settings);
+    auto snippet = std::string {"set(_lockstep_library_cache "}
+                   + (isEnabled ? "ON" : "OFF") + ")\n";
+
+    if (isEnabled)
+        parseToolchainRanges(settings);
+
+    if (eacp::Files::isFile(settingsFile))
+        snippet += "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "
+                   + quoteForCMake(settingsFile.str()) + ")\n";
+
+    auto output =
+        options.buildDirectory / "_lockstep" / "library-cache-switch.cmake";
+    eacp::Files::createDirectories(output.parentDirectory());
+    eacp::Files::writeFile(output, snippet);
+}
+
 PackageSpec parseArgumentsFrom(const CommandOptions& options)
 {
     try
@@ -628,6 +656,7 @@ PackageSpec parseArgumentsFrom(const CommandOptions& options)
 int runBeginCommand(const CommandOptions& options)
 {
     checkLoadedDuringProject(options);
+    writeLibraryCacheSwitch(options);
 
     if (options.mode != Mode::update && !isLockFileCurrent(options.lock))
     {

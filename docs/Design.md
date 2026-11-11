@@ -52,7 +52,10 @@ it waits for a project that needs it.
 | Merkle content check | on | `verify = "off"` turns it off |
 | Cache of packages' built static libraries, executables and object files | off | `LOCKSTEP_LIBRARY_CACHE=ON` in the environment for every project, or `-DLOCKSTEP_LIBRARY_CACHE=ON` for one build directory |
 | One library cache for several machines | off | `LOCKSTEP_LIBRARY_CACHE_LOCATION=<directory>` or `[user@]host:<directory>`, in the environment or as `-D` on a build directory |
-| `lockstep.toml` manifest | off | add the file |
+| Library cache builds by another compiler | off | `LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE=<range>`, in the environment, as `-D` on a build directory or as `compilerRange` in `lockstep.json` |
+| Library cache builds against another Apple SDK | off | `LOCKSTEP_LIBRARY_CACHE_SDK_RANGE=<range>`, the same ways, or `sdkRange` |
+| Library cache size limit | 5 GiB on each machine, 20 GiB at a location | `LOCKSTEP_LIBRARY_CACHE_MAX_SIZE` and `LOCKSTEP_LIBRARY_CACHE_LOCATION_MAX_SIZE`, or `maxSize` and `locationMaxSize` |
+| `lockstep.json` settings | off | add the file; each setting above can be in its `libraryCache` |
 | Record the toolchain version | off | `toolchain = "record"` |
 | Enforce the toolchain version | off | `toolchain = "enforce"` |
 | Fetched toolchains | off | `toolchain = { fetch = "llvm-19.1.7" }` |
@@ -63,10 +66,11 @@ the others.
 ## Roadmap
 
 1. Move real projects onto the lock (tamber-web first).
-2. `lockstep.toml`: a declarative manifest, with per-platform files
-   (`lockstep.macos.toml`) merged over it. Tables merge by key, values
-   replace, lists append, `remove = [...]` takes items out. lockstep
+2. Package declarations in `lockstep.json`, which already holds the library
+   cache settings: a declarative manifest, with per-platform files
+   (`lockstep.macos.json`) merged over it. Objects merge by key, values
+   replace, lists append, `"remove": [...]` takes items out. lockstep
    generates CMake from it, so IDEs and packages without a manifest keep
-   working. It reads TOML through Miro (eyalamirmusic/Miro#18).
+   working. It reads the JSON through Miro, as it reads the lock.
 3. Recording the toolchain version.
 4. Fetched toolchains, when someone needs them.

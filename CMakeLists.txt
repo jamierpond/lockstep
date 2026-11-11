@@ -53,6 +53,7 @@ add_library(lockstep-lib STATIC
         src/PackageArguments.cpp
         src/PackageCache.cpp
         src/PinnedRelease.cpp
+        src/ProjectSettings.cpp
         src/Session.cpp
         src/Status.cpp
         src/Submodules.cpp

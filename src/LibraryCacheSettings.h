@@ -3,6 +3,7 @@
 #include "BuiltWith.h"
 
 #include <eacp/Core/Utils/Containers.h>
+#include <eacp/Core/Utils/FilePath.h>
 
 #include <cstdint>
 #include <map>
@@ -61,11 +62,13 @@ struct SettingDescription
 
 const std::vector<SettingDescription>& getSettingDescriptions();
 
-// The sources from the module's --cache-variable=<name>=<value> definitions and
-// the environment variables read at start-up.
+// The sources from the module's --cache-variable=<name>=<value> definitions,
+// the environment variables read at start-up and the project's lockstep.json,
+// which it reads (see readProjectSettings).
 SettingSources
     createSettingSources(const eacp::Vector<std::string>& cacheVariables,
-                         const std::map<std::string, std::string>& environment);
+                         const std::map<std::string, std::string>& environment,
+                         const eacp::FilePath& projectSettingsFile);
 
 LibraryCacheSettings resolveLibraryCacheSettings(const SettingSources& sources);
 

@@ -1,5 +1,6 @@
 #include "LibraryCacheSettings.h"
 #include "PackageArguments.h"
+#include "ProjectSettings.h"
 
 #include <array>
 #include <stdexcept>
@@ -97,10 +98,13 @@ const std::vector<SettingDescription>& getSettingDescriptions()
 
 SettingSources
     createSettingSources(const eacp::Vector<std::string>& cacheVariables,
-                         const std::map<std::string, std::string>& environment)
+                         const std::map<std::string, std::string>& environment,
+                         const eacp::FilePath& projectSettingsFile)
 {
     auto sources = SettingSources {};
     sources.environment = environment;
+    sources.projectFile =
+        getLibraryCacheSettingValues(readProjectSettings(projectSettingsFile));
 
     for (const auto& definition: cacheVariables)
     {

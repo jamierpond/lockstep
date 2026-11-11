@@ -8,7 +8,9 @@
 #include "LongPath.h"
 #include "LibraryStore.h"
 #include "Messages.h"
+#include "PinnedRelease.h"
 #include "PackageArguments.h"
+#include "ProjectSettings.h"
 #include "Session.h"
 #include "Status.h"
 
@@ -650,6 +652,25 @@ std::size_t findLabelWidth(const std::vector<StatisticsLine>& lines)
     return width;
 }
 
+void printLines(const std::vector<StatisticsLine>& lines)
+{
+    auto labelWidth = findLabelWidth(lines);
+    auto valueWidth = std::size_t {statisticsValueWidth};
+
+    for (const auto& line: lines)
+        valueWidth = std::max(valueWidth, line.value.size() + statisticsLabelGap);
+
+    for (const auto& line: lines)
+    {
+        eacp::Console::print(eacp::Strings::format("  {:<{}}{:<{}}{}",
+                                                   line.label,
+                                                   labelWidth,
+                                                   line.value,
+                                                   valueWidth,
+                                                   line.meaning));
+    }
+}
+
 void printStoreSummary(const CommandOptions& options)
 {
     auto copies = (options.cache / "lib").str();
@@ -661,19 +682,58 @@ void printStoreSummary(const CommandOptions& options)
     else
         eacp::Console::print("library cache " + copies);
 
-    auto lines =
-        createStatisticsLines(LibraryStore {options.cache}.summarize(), hasLocation);
-    auto labelWidth = findLabelWidth(lines);
+    printLines(createStatisticsLines(LibraryStore {options.cache}.summarize(),
+                                     hasLocation));
+}
 
-    for (const auto& line: lines)
+struct SettingsInForce
+{
+    LibraryCacheSettings settings;
+    std::optional<eacp::FilePath> projectFile;
+};
+
+// What a cache command run here reads: the environment and the lockstep.json
+// beside the lock of the project around the working directory. A build
+// directory's -D is not read, since these commands run outside any build.
+SettingsInForce findSettingsInForce(const CommandOptions& options)
+{
+    auto inForce = SettingsInForce {};
+    auto lockFile = findEnclosingLockFile(std::filesystem::current_path());
+
+    if (lockFile && eacp::Files::isFile(getProjectSettingsPath(*lockFile)))
+        inForce.projectFile = getProjectSettingsPath(*lockFile);
+
+    inForce.settings = resolveLibraryCacheSettings(
+        createSettingSources({},
+                             options.settingEnvironment,
+                             inForce.projectFile.value_or(eacp::FilePath {})));
+    return inForce;
+}
+
+std::string describeSource(const SettingsInForce& inForce, SettingSource source)
+{
+    if (source == SettingSource::projectFile && inForce.projectFile)
+        return inForce.projectFile->str();
+
+    return describeSettingSource(source);
+}
+
+void printSettings(const SettingsInForce& inForce)
+{
+    auto lines = std::vector<StatisticsLine> {};
+
+    for (const auto& description: getSettingDescriptions())
     {
-        eacp::Console::print(eacp::Strings::format("  {:<{}}{:<{}}{}",
-                                                   line.label,
-                                                   labelWidth,
-                                                   line.value,
-                                                   statisticsValueWidth,
-                                                   line.meaning));
+        const auto& value = inForce.settings.*description.member;
+        auto text = value.text.empty() ? std::string {"(unset)"} : value.text;
+        lines.push_back({std::string {description.variable},
+                         text,
+                         describeSource(inForce, value.source)});
     }
+
+    eacp::Console::print("settings here, and where each comes from (a -D on a build "
+                         "directory wins over them there)");
+    printLines(lines);
 }
 
 std::string describeClearedStore(const CommandOptions& options)
@@ -691,8 +751,10 @@ std::string describeClearedStore(const CommandOptions& options)
 
 int runLibraryCacheCommand(const CommandOptions& commandOptions)
 {
-    auto settings = resolveLibraryCacheSettings(createSettingSources(
-        commandOptions.cacheVariables, commandOptions.settingEnvironment));
+    auto settings = resolveLibraryCacheSettings(
+        createSettingSources(commandOptions.cacheVariables,
+                             commandOptions.settingEnvironment,
+                             getProjectSettingsPath(commandOptions.lock)));
     auto options = commandOptions;
     options.libraryCacheLocation = settings.location.text;
     auto description =
@@ -815,13 +877,17 @@ int runSendLibrariesCommand(const CommandOptions& options)
     }
 }
 
-int runCacheCommand(const CommandOptions& options)
+int runCacheCommand(const CommandOptions& commandOptions)
 {
+    auto inForce = findSettingsInForce(commandOptions);
+    auto options = commandOptions;
+    options.libraryCacheLocation = inForce.settings.location.text;
     auto subcommand = options.names.empty() ? std::string {} : options.names[0];
 
     if (subcommand == "stats" && options.names.size() == 1)
     {
         printStoreSummary(options);
+        printSettings(inForce);
         return 0;
     }
 
