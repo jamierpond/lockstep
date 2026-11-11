@@ -17,8 +17,14 @@ set(EACP_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(EACP_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(EACP_BUILD_SPIRV OFF CACHE BOOL "" FORCE)
 
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(cmake/linux-static-curl.cmake)
+endif ()
+
 lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp
         GIT_TAG 57b2ef604bd12d340d7c62873da74525611e9071 EXCLUDE_FROM_ALL)
+lockstep_add_package(NAME emberstore GITHUB tamber-inc/emberstore
+        GIT_TAG 2cda8a019ff2df7ee135f1b5a89847378bbcaf55 EXCLUDE_FROM_ALL)
 
 add_library(lockstep-lib STATIC
         src/CMakeSnippet.cpp
@@ -26,6 +32,10 @@ add_library(lockstep-lib STATIC
         src/Messages.cpp
         src/Download.cpp
         src/Git.cpp
+        src/LibraryCache.cpp
+        src/LibraryCacheCommands.cpp
+        src/LibraryCacheLocation.cpp
+        src/LibraryStore.cpp
         src/LockFile.cpp
         src/LongPath.cpp
         src/MerkleHash.cpp
@@ -39,6 +49,7 @@ add_library(lockstep-lib STATIC
 
 target_include_directories(lockstep-lib PUBLIC src)
 target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)
+target_link_libraries(lockstep-lib PRIVATE emberstore)
 
 add_executable(lockstep src/Main.cpp)
 
@@ -51,7 +62,7 @@ target_link_libraries(lockstep PRIVATE lockstep-lib)
 # Apple's ld warns about the duplicate.
 set_property(TARGET lockstep PROPERTY LINK_LIBRARIES_STRATEGY REORDER_FREELY)
 res_embed_add(lockstep
-        FILES cmake/lockstep-module.cmake
+        FILES cmake/lockstep-module.cmake cmake/lockstep-library-cache.cmake
         NAMESPACE LockstepModule
         CATEGORY LockstepModule)
 target_compile_definitions(lockstep PRIVATE

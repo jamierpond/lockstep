@@ -1,8 +1,11 @@
 lockstep_add_package(NAME NanoTest GITHUB eyalamirmusic/NanoTest GIT_TAG main)
 
 nano_add_executable(LockstepTests
-        SOURCES Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp
-        TARGETS lockstep-lib)
+        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp
+        TARGETS lockstep-lib
+        NO_MAIN)
+target_compile_definitions(LockstepTests PRIVATE
+        LOCKSTEP_TESTS_EXECUTABLE="$<TARGET_FILE:LockstepTests>")
 
 function(add_consumer_project_test name expected_packages)
     add_test(NAME Consumer/${name}
@@ -65,3 +68,38 @@ add_test(NAME Consumer/archiveWithWrongHash
         -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
         -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
         -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBadHashProject.cmake)
+
+# The library cache handles single-configuration generators only.
+get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if (NOT is_multi_config)
+    add_test(NAME Consumer/libraryCache
+            COMMAND ${CMAKE_COMMAND}
+            -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/library-cache
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-library-cache
+            -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+            -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+            "-DGENERATOR=${CMAKE_GENERATOR}"
+            "-DMSVC_ABI=${MSVC}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunLibraryCacheProject.cmake)
+
+    function(add_library_cache_location_test name)
+        add_test(NAME Consumer/${name}
+                COMMAND ${CMAKE_COMMAND}
+                -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/library-cache
+                -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-${name}
+                -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+                -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+                "-DGENERATOR=${CMAKE_GENERATOR}"
+                ${ARGN}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/RunLibraryCacheLocationProject.cmake)
+    endfunction()
+
+    add_library_cache_location_test(libraryCacheLocation)
+
+    # Reported as skipped where `ssh -o BatchMode=yes <host> true` fails.
+    set(LOCKSTEP_TESTS_SSH_HOST localhost CACHE STRING
+            "The host Consumer/libraryCacheOverSsh keeps a library cache location on")
+    add_library_cache_location_test(libraryCacheOverSsh "-DSSH_HOST=${LOCKSTEP_TESTS_SSH_HOST}")
+    set_tests_properties(Consumer/libraryCacheOverSsh PROPERTIES
+            SKIP_REGULAR_EXPRESSION "lockstep-test-skipped")
+endif ()

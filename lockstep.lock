@@ -2,6 +2,22 @@
   "bootstrap": "cmake/lockstep.cmake",
   "packages": [
     {
+      "commit": "",
+      "hash": "ec88ff6403591b1bcbc1d582357c6fc15b97302455b60b1c5d7cca7043081e78",
+      "kind": "archive",
+      "name": "CURL",
+      "patches": [],
+      "requestedRef": "",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
+      "url": "https://curl.se/download/curl-8.23.0.tar.gz",
+      "usesGitLfs": false
+    },
+    {
       "commit": "9f26b4a120ef7e97a5f6d430c1bd9010d23e3709",
       "hash": "efc3c23665509c858b1cf7da9aaa41ba1423fb3c89b6381a98da6a2cbff3d06c",
       "kind": "git",
@@ -14,7 +30,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/cpp_data_structures.git"
+      "url": "https://github.com/eyalamirmusic/cpp_data_structures.git",
+      "usesGitLfs": false
     },
     {
       "commit": "1712e729e6c292f7e73abf817bf511f35dcffe4c",
@@ -29,7 +46,24 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/ESIMD.git"
+      "url": "https://github.com/eyalamirmusic/ESIMD.git",
+      "usesGitLfs": false
+    },
+    {
+      "commit": "",
+      "hash": "abbc62ad3dff379a61c9bdd4875b17b2665953d0abf2859378b758ada4ee11e2",
+      "kind": "archive",
+      "name": "MbedTLSSource",
+      "patches": [],
+      "requestedRef": "",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
+      "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2",
+      "usesGitLfs": false
     },
     {
       "commit": "e6fc9b9acd899fbafc9431637a98198d484f6fd5",
@@ -44,7 +78,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/Miro.git"
+      "url": "https://github.com/eyalamirmusic/Miro.git",
+      "usesGitLfs": false
     },
     {
       "commit": "1b193ebc095338c967af3d658e74b0d6f870bf9b",
@@ -59,7 +94,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/NanoTest.git"
+      "url": "https://github.com/eyalamirmusic/NanoTest.git",
+      "usesGitLfs": false
     },
     {
       "commit": "8cfcbfa7bdf2214c8939502a349b7d4fb4ac73bb",
@@ -74,7 +110,8 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/ResEmbed.git"
+      "url": "https://github.com/eyalamirmusic/ResEmbed.git",
+      "usesGitLfs": false
     },
     {
       "commit": "57b2ef604bd12d340d7c62873da74525611e9071",
@@ -89,9 +126,26 @@
         "paths": []
       },
       "submodules": [],
-      "url": "https://github.com/eyalamirmusic/eacp.git"
+      "url": "https://github.com/eyalamirmusic/eacp.git",
+      "usesGitLfs": false
+    },
+    {
+      "commit": "2cda8a019ff2df7ee135f1b5a89847378bbcaf55",
+      "hash": "603e945e2ad64317817293de150a03919757889e0b4ba84a9b273e17bcf2c12f",
+      "kind": "git",
+      "name": "emberstore",
+      "patches": [],
+      "requestedRef": "2cda8a019ff2df7ee135f1b5a89847378bbcaf55",
+      "submoduleSelection": {
+        "isRecursive": true,
+        "isRestricted": false,
+        "paths": []
+      },
+      "submodules": [],
+      "url": "https://github.com/tamber-inc/emberstore.git",
+      "usesGitLfs": false
     }
   ],
-  "root": "6eea5836c82799684d116372b7b2e28fd34515ee276a1488bd67aeffa2563c28",
+  "root": "1d5a007c137e0530ca4e73bc6ac271ad5d159c6930f99cb3424e79c2bc07c78f",
   "version": 1
 }

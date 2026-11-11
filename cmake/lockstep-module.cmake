@@ -77,3 +77,12 @@ cmake_language(SET_DEPENDENCY_PROVIDER _lockstep_provide
         SUPPORTED_METHODS FETCHCONTENT_MAKEAVAILABLE_SERIAL)
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL
         execute_process COMMAND ${_LOCKSTEP_COMMAND} root --announce)
+# A -DLOCKSTEP_LIBRARY_CACHE on the build directory wins over the environment
+# variable, which turns the cache on for every project on the machine.
+set(_lockstep_library_cache "$ENV{LOCKSTEP_LIBRARY_CACHE}")
+if (DEFINED CACHE{LOCKSTEP_LIBRARY_CACHE})
+    set(_lockstep_library_cache "${LOCKSTEP_LIBRARY_CACHE}")
+endif ()
+if (_lockstep_library_cache)
+    include("${CMAKE_CURRENT_LIST_DIR}/lockstep-library-cache.cmake")
+endif ()

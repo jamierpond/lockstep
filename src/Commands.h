@@ -19,7 +19,9 @@ struct CommandOptions
 {
     std::string command;
     eacp::Vector<std::string> names;
-    std::vector<std::string> packageArguments;
+    // A package's CMake arguments for add and provide; the wrapped command for
+    // use-cached-library and store-libraries.
+    std::vector<std::string> argumentsAfterSeparator;
     Mode mode = Mode::locked;
     bool isCI = false;
     eacp::FilePath lock;
@@ -32,6 +34,10 @@ struct CommandOptions
     eacp::FilePath requestedByFile;
     eacp::FilePath requestedBinaryDirectory;
     eacp::FilePath output;
+    eacp::FilePath input;
+    eacp::Vector<std::string> libraries;
+    // LOCKSTEP_LIBRARY_CACHE_LOCATION: a directory or [user@]host:directory.
+    std::string libraryCacheLocation;
     std::string topLevelIncludes;
     eacp::Vector<std::string> overrides;
     bool isFullVerify = false;
@@ -45,4 +51,9 @@ int runUpdateCommand(const CommandOptions& options);
 int runVerifyCommand(const CommandOptions& options);
 int runRootCommand(const CommandOptions& options);
 int runCMakeModuleCommand(const CommandOptions& options);
+int runLibraryCacheCommand(const CommandOptions& options);
+int runUseCachedLibraryCommand(const CommandOptions& options);
+int runStoreLibrariesCommand(const CommandOptions& options);
+int runSendLibrariesCommand(const CommandOptions& options);
+int runCacheCommand(const CommandOptions& options);
 } // namespace lockstep

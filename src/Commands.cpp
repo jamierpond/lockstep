@@ -616,7 +616,7 @@ PackageSpec parseArgumentsFrom(const CommandOptions& options)
 {
     try
     {
-        return parsePackageArguments(options.packageArguments);
+        return parsePackageArguments(options.argumentsAfterSeparator);
     }
     catch (const std::invalid_argument& error)
     {
@@ -797,12 +797,16 @@ int runRootCommand(const CommandOptions& options)
 int runCMakeModuleCommand(const CommandOptions& options)
 {
     auto module = ResEmbed::get("lockstep-module.cmake", "LockstepModule");
+    auto libraryCache =
+        ResEmbed::get("lockstep-library-cache.cmake", "LockstepModule");
 
-    if (!module)
+    if (!module || !libraryCache)
         throw std::runtime_error("this lockstep was built without its CMake module");
 
     eacp::Files::createDirectories(options.output.parentDirectory());
     eacp::Files::writeFile(options.output, module.toStringView());
+    eacp::Files::writeFile(options.output.sibling("lockstep-library-cache.cmake"),
+                           libraryCache.toStringView());
     return 0;
 }
 } // namespace lockstep

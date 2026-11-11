@@ -14,6 +14,7 @@
 #include <eacp/Core/Utils/Strings.h>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <stdexcept>
 
@@ -30,11 +31,20 @@ constexpr auto commandsHelp = R"(commands:
                  lock hash
   root           print the root hash over every package in the lock
   cmake-module   write the CMake module the bootstrap includes to --output
-  begin, add, provide
+  cache stats    print the library cache's stored libraries, size, hits and
+                 misses
+  cache clear    delete the library cache's stored libraries and counts
+  begin, add, provide, library-cache
                  run by the CMake module during configure; add and provide take
-                 the package's CMake arguments after --)";
+                 the package's CMake arguments after --
+  use-cached-library, store-libraries
+                 run by the build in place of, or around, the link command
+                 after --, when LOCKSTEP_LIBRARY_CACHE is ON
+  send-libraries started by store-libraries and library-cache to copy
+                 libraries to LOCKSTEP_LIBRARY_CACHE_LOCATION)";
 
 constexpr auto argumentSeparator = std::string_view {"--"};
+constexpr auto machineWideCommand = std::string_view {"cache"};
 
 eacp::FilePath getCacheDirectory(const eacp::FilePath& requested)
 {
@@ -81,9 +91,20 @@ std::optional<lockstep::PinnedRelease> findProjectPinnedRelease()
     return lockstep::readPinnedRelease(lockPath->parentDirectory() / lock.bootstrap);
 }
 
+// The cache commands act on the machine's store, not a project, so this binary
+// runs them whichever release the project pins.
+bool isMachineWideCommand(const eacp::Vector<std::string>& arguments)
+{
+    auto isOption = [](const std::string& argument)
+    { return argument.starts_with('-'); };
+    auto command = std::ranges::find_if_not(arguments, isOption);
+    return command != arguments.end() && *command == machineWideCommand;
+}
+
 std::optional<int> runProjectPinnedVersionInstead()
 {
-    if (eacp::getEnv("LOCKSTEP_EXECUTABLE"))
+    if (eacp::getEnv("LOCKSTEP_EXECUTABLE")
+        || isMachineWideCommand(getArgumentsAfterProgram()))
         return std::nullopt;
 
     auto release = findProjectPinnedRelease();
@@ -104,62 +125,51 @@ std::optional<int> runProjectPinnedVersionInstead()
     return eacp::Processes::run(options).exitCode;
 }
 
+using CommandFunction = int (*)(const lockstep::CommandOptions&);
+
+constexpr auto commandFunctions =
+    std::array<std::pair<std::string_view, CommandFunction>, 12> {
+        {{"begin", lockstep::runBeginCommand},
+         {"add", lockstep::runAddCommand},
+         {"provide", lockstep::runProvideCommand},
+         {"update", lockstep::runUpdateCommand},
+         {"verify", lockstep::runVerifyCommand},
+         {"root", lockstep::runRootCommand},
+         {"cmake-module", lockstep::runCMakeModuleCommand},
+         {"library-cache", lockstep::runLibraryCacheCommand},
+         {"use-cached-library", lockstep::runUseCachedLibraryCommand},
+         {"store-libraries", lockstep::runStoreLibrariesCommand},
+         {"send-libraries", lockstep::runSendLibrariesCommand},
+         {machineWideCommand, lockstep::runCacheCommand}}};
+
+// The build passes the location its configure read; the cache commands, which
+// run outside any build, read the environment variable.
+std::string getLibraryCacheLocation(const lockstep::CommandOptions& options)
+{
+    if (options.command != machineWideCommand)
+        return options.libraryCacheLocation;
+
+    return eacp::getEnvValue("LOCKSTEP_LIBRARY_CACHE_LOCATION");
+}
+
 int runCommand(lockstep::CommandOptions options)
 {
     options.cache = getCacheDirectory(options.cache);
+    options.libraryCacheLocation = getLibraryCacheLocation(options);
     options.lock = getLockFile(options);
 
-    if (options.command == "begin")
-        return lockstep::runBeginCommand(options);
-
-    if (options.command == "add")
-        return lockstep::runAddCommand(options);
-
-    if (options.command == "provide")
-        return lockstep::runProvideCommand(options);
-
-    if (options.command == "update")
-        return lockstep::runUpdateCommand(options);
-
-    if (options.command == "verify")
-        return lockstep::runVerifyCommand(options);
-
-    if (options.command == "root")
-        return lockstep::runRootCommand(options);
-
-    if (options.command == "cmake-module")
-        return lockstep::runCMakeModuleCommand(options);
+    for (const auto& [name, function]: commandFunctions)
+    {
+        if (options.command == name)
+            return function(options);
+    }
 
     throw std::runtime_error("unknown command '" + options.command
                              + "'; run lockstep --help for the list");
 }
 
-int parseAndRunCommand()
+void addPathOptions(eacp::Args::Parser& parser, lockstep::CommandOptions& options)
 {
-    if (auto exitCode = runProjectPinnedVersionInstead())
-        return *exitCode;
-
-    auto arguments = getArgumentsAfterProgram();
-
-    auto options = lockstep::CommandOptions {};
-    auto separator =
-        std::find(arguments.begin(), arguments.end(), argumentSeparator);
-
-    if (separator != arguments.end())
-    {
-        options.packageArguments.assign(separator + 1, arguments.end());
-        arguments.getVector().erase(separator, arguments.end());
-    }
-
-    auto ciValue = std::string {};
-    auto parser = eacp::Args::Parser {"lockstep", toolDescription};
-
-    parser.positional(options.command, "command", "see the list below");
-    parser.positional(options.names, "name", "the packages update re-resolves");
-    parser.option(
-        "--mode", options.mode, "locked, update or offline [default: locked]");
-    parser.option(
-        "--ci", ciValue, "ON refuses <Name>_SOURCE overrides in locked mode");
     parser.option("--lock",
                   options.lock,
                   "the lock file [default: <source-dir>/lockstep.lock]");
@@ -181,8 +191,30 @@ int parseAndRunCommand()
     parser.option("--requested-binary-dir",
                   options.requestedBinaryDirectory,
                   "its binary directory, which a relative SOURCE_DIR is under");
+    parser.option("--output",
+                  options.output,
+                  "the file add, provide, cmake-module and library-cache write; the "
+                  "library use-cached-library writes");
     parser.option(
-        "--output", options.output, "the file add, provide and cmake-module write");
+        "--input", options.input, "the target descriptions library-cache reads");
+}
+
+void addBehaviourOptions(eacp::Args::Parser& parser,
+                         lockstep::CommandOptions& options,
+                         std::string& ciValue)
+{
+    parser.option(
+        "--mode", options.mode, "locked, update or offline [default: locked]");
+    parser.option(
+        "--ci", ciValue, "ON refuses <Name>_SOURCE overrides in locked mode");
+    parser.option("--library",
+                  options.libraries,
+                  "a cached library for use-cached-library; <key>=<library> for "
+                  "store-libraries");
+    parser.option("--library-cache-location",
+                  options.libraryCacheLocation,
+                  "a directory or [user@]host:directory holding the library cache, "
+                  "which the build passes on from LOCKSTEP_LIBRARY_CACHE_LOCATION");
     parser.option(
         "--top-level-includes",
         options.topLevelIncludes,
@@ -196,6 +228,34 @@ int parseAndRunCommand()
     parser.flag("--announce",
                 options.shouldAnnounce,
                 "root prints '-- lockstep: root <hash>'");
+}
+
+int parseAndRunCommand()
+{
+    if (auto exitCode = runProjectPinnedVersionInstead())
+        return *exitCode;
+
+    auto arguments = getArgumentsAfterProgram();
+
+    auto options = lockstep::CommandOptions {};
+    auto separator =
+        std::find(arguments.begin(), arguments.end(), argumentSeparator);
+
+    if (separator != arguments.end())
+    {
+        options.argumentsAfterSeparator.assign(separator + 1, arguments.end());
+        arguments.getVector().erase(separator, arguments.end());
+    }
+
+    auto ciValue = std::string {};
+    auto parser = eacp::Args::Parser {"lockstep", toolDescription};
+
+    parser.positional(options.command, "command", "see the list below");
+    parser.positional(options.names,
+                      "name",
+                      "the packages update re-resolves; stats or clear after cache");
+    addPathOptions(parser, options);
+    addBehaviourOptions(parser, options, ciValue);
     parser.epilogue(commandsHelp);
 
     if (auto code = parser.exitCodeFor(parser.parse(arguments)))
