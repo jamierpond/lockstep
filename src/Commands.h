@@ -41,10 +41,11 @@ struct CommandOptions
     // library, that store-libraries stores after the link.
     eacp::Vector<std::string> executables;
     eacp::Vector<std::string> objectLibraries;
-    // The stored object files use-cached-objects copies, in the order of the
-    // ;-list in `objects`, $<TARGET_OBJECTS:...> of the object library.
-    eacp::Vector<std::string> storedObjects;
-    std::string objects;
+    // A file listing the stored object files use-cached-objects copies, one
+    // per line, in the order of the ;-list in `objectList`.
+    eacp::FilePath storedObjectList;
+    // A file holding $<TARGET_OBJECTS:...> of the object library, a ;-list.
+    eacp::FilePath objectList;
     // The object file the compile use-cached-objects stands in for writes.
     std::string object;
     // LOCKSTEP_LIBRARY_CACHE_LOCATION: a directory or [user@]host:directory.

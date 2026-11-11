@@ -114,6 +114,8 @@ void startSendingLibraries(const CommandOptions& options,
     process.arguments = {"send-libraries"};
     process.arguments.addFrom(createSharedArguments(options));
 
+    process.arguments.addFrom(createSizeLimitArguments(options));
+
     for (const auto& address: addresses)
         process.arguments.add("--library=" + address.getPath());
 
@@ -274,6 +276,24 @@ LibraryCacheSizeLimits getSizeLimits(const CommandOptions& options)
         limits.locationBytes = parseByteSize(options.libraryCacheLocationMaxSize);
 
     return limits;
+}
+
+std::vector<std::string> readStoredObjectList(const eacp::FilePath& list)
+{
+    auto objects = std::vector<std::string> {};
+
+    if (!eacp::Files::isFile(list))
+        return objects;
+
+    for (const auto& line: eacp::Strings::split(eacp::Files::readFile(list), '\n'))
+    {
+        auto object = eacp::Strings::trim(line);
+
+        if (!object.empty())
+            objects.push_back(object);
+    }
+
+    return objects;
 }
 
 // A copy out of <store>/<key>/<build id>/ marks that entry used.
@@ -901,9 +921,11 @@ int runUseCachedLibraryCommand(const CommandOptions& options)
 int runUseCachedObjectsCommand(const CommandOptions& options)
 {
     const auto& command = options.argumentsAfterSeparator;
-    auto objects = splitCMakeList(options.objects);
+    auto objects = splitCMakeList(
+        eacp::Strings::trim(eacp::Files::readFile(options.objectList)));
+    auto storedObjects = readStoredObjectList(options.storedObjectList);
     auto index = findObjectIndex(objects, options.object);
-    auto isStoredInSameOrder = objects.size() == options.storedObjects.size();
+    auto isStoredInSameOrder = objects.size() == storedObjects.size();
 
     // A compile that writes none of the stored objects, such as a precompiled
     // header's, runs as it is.
@@ -915,7 +937,7 @@ int runUseCachedObjectsCommand(const CommandOptions& options)
         return runWrappedCommand(command, "use-cached-objects");
     }
 
-    auto stored = eacp::FilePath {options.storedObjects[*index]};
+    auto stored = eacp::FilePath {storedObjects[*index]};
     copyIntoPlace(stored, eacp::FilePath {options.object});
     markStoredFileUsed(options, stored);
     return 0;

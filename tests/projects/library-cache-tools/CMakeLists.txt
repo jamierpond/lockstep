@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 # The test's compile recorder, so it sees which sources each build compiled.
 if (SAMPLE_COMPILE_RECORD)
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CMAKE_COMMAND}" "-DRECORD_FILE=${SAMPLE_COMPILE_RECORD}"
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CMAKE_COMMAND}" "-DRECORD_DIRECTORY=${SAMPLE_COMPILE_RECORD}"
             -P "${CMAKE_CURRENT_LIST_DIR}/../../RecordCompile.cmake" --)
 endif ()
 

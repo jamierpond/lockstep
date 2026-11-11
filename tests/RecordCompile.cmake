@@ -1,6 +1,9 @@
-# A compiler launcher that appends each compile command to RECORD_FILE and then
-# runs it, so a test can see which sources a build really compiled:
-# cmake -DRECORD_FILE=<file> -P RecordCompile.cmake -- <compiler> <arguments>...
+# A compiler launcher that records each compile command in a file of its own in
+# the directory RECORD_DIRECTORY and then runs it, so a test can see which
+# sources a build really compiled:
+# cmake -DRECORD_DIRECTORY=<directory> -P RecordCompile.cmake -- <compiler> <arguments>...
+# One file per compile, named by the command's hash: parallel compiles that
+# appended to one file lost lines on Windows, where appending is not atomic.
 # A response file's (@<file>) contents are recorded too, since NMake passes the
 # source in one.
 
@@ -27,7 +30,8 @@ foreach (argument IN LISTS command)
         string(APPEND record " ${response_file_text}")
     endif ()
 endforeach ()
-file(APPEND "${RECORD_FILE}" "${record}\n")
+string(SHA256 record_name "${record}")
+file(WRITE "${RECORD_DIRECTORY}/${record_name}.txt" "${record}\n")
 execute_process(COMMAND ${command} RESULT_VARIABLE exit_code)
 if (NOT exit_code EQUAL 0)
     message(FATAL_ERROR "the compile failed with ${exit_code}")

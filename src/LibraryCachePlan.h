@@ -90,6 +90,19 @@ eacp::Vector<std::string> createSharedArguments(const CommandOptions& options);
 // options every library cache command the build runs takes.
 std::string createLauncher(const CommandOptions& options, std::string_view command);
 
+// The size limits, which only the commands that store or send need.
+eacp::Vector<std::string> createSizeLimitArguments(const CommandOptions& options);
+
+// The stored objects use-cached-objects copies for an object library hit, one
+// path per line, so the compile line, which NMake has to read, stays short.
+eacp::FilePath getStoredObjectListPath(const eacp::FilePath& buildDirectory,
+                                       const std::string& key);
+
+// $<TARGET_OBJECTS:...> of an object library hit, which file(GENERATE) writes
+// as a ;-list: the object files its compiles write.
+eacp::FilePath getTargetObjectListPath(const eacp::FilePath& buildDirectory,
+                                       const std::string& key);
+
 std::string quoteForShell(const std::string& text);
 
 // The CMake that makes every hit build from the store and every link store

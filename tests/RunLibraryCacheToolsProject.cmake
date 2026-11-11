@@ -33,20 +33,24 @@ function(run_ssh)
 endfunction()
 
 # Configures with the test's compile recorder, which logs every compile the
-# build really runs to <build>-compiles.txt.
+# build really runs into <build>-compiles/, one file per compile.
 function(configure_recorded build expected_summary)
     configure("${build}" "${expected_summary}"
-            "-DSAMPLE_COMPILE_RECORD=${WORK_DIR}/${build}-compiles.txt" ${ARGN})
+            "-DSAMPLE_COMPILE_RECORD=${WORK_DIR}/${build}-compiles" ${ARGN})
     set(step_output "${step_output}" PARENT_SCOPE)
 endfunction()
 
 function(expect_package_compiles build expected_count)
-    set(record "${WORK_DIR}/${build}-compiles.txt")
-    set(compiles)
-    if (EXISTS "${record}")
-        file(STRINGS "${record}" compiles REGEX "${package_sources}")
-    endif ()
-    list(LENGTH compiles count)
+    file(GLOB records "${WORK_DIR}/${build}-compiles/*.txt")
+    set(compiles "")
+    set(count 0)
+    foreach (record IN LISTS records)
+        file(READ "${record}" compile)
+        if (compile MATCHES "${package_sources}")
+            math(EXPR count "${count} + 1")
+            string(APPEND compiles "${compile}")
+        endif ()
+    endforeach ()
     if (NOT count EQUAL expected_count)
         message(FATAL_ERROR "${build} compiled ${count} of the package's sources, not ${expected_count}:\n${compiles}")
     endif ()

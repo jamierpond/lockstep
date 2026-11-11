@@ -207,6 +207,17 @@ std::string createCopyingLinkLauncher(const CommandOptions& options,
            + " --";
 }
 
+// One stored object path per line, in $<TARGET_OBJECTS:...> order.
+std::string listStoredObjects(const StoredEntry& entry)
+{
+    auto lines = std::string {};
+
+    for (const auto& object: entry.getFilePaths())
+        lines += object.str() + "\n";
+
+    return lines;
+}
+
 // The target compiles one empty stub instead of its sources, and its archive
 // step copies the cached library into place instead of archiving the stub.
 std::string createStaticLibraryHitSnippet(const CommandOptions& options,
@@ -234,19 +245,22 @@ std::string createExecutableHitSnippet(const CommandOptions& options,
 // The target keeps its sources, so $<TARGET_OBJECTS:...> names the same files,
 // and each compile copies its stored object into place instead of compiling.
 // The generator replaces <OBJECT> with the object file each compile writes.
+// Both lists of objects go into files, not onto the compile line: NMake fails
+// to read some long compile lines ("')' missing in macro invocation").
 std::string createObjectLibraryHitSnippet(const CommandOptions& options,
                                           const LibraryDecision& decision)
 {
-    auto launcher = createLauncher(options, "use-cached-objects");
-
-    for (const auto& object: decision.cached->getFilePaths())
-        launcher += " " + quoteForShell("--stored-object=" + object.str());
-
-    launcher +=
-        " " + quoteForShell("--objects=$<TARGET_OBJECTS:" + decision.target + ">")
-        + " " + quoteForShell("--object=<OBJECT>") + " --";
-    return createPropertySetting(
-        decision.target, "RULE_LAUNCH_COMPILE", quoteForCMake(launcher));
+    const auto& key = decision.key.key;
+    auto storedList = getStoredObjectListPath(options.buildDirectory, key);
+    auto targetList = getTargetObjectListPath(options.buildDirectory, key);
+    auto launcher = createLauncher(options, "use-cached-objects") + " "
+                    + quoteForShell("--stored-object-list=" + storedList.str()) + " "
+                    + quoteForShell("--object-list=" + targetList.str()) + " "
+                    + quoteForShell("--object=<OBJECT>") + " --";
+    return "file(GENERATE OUTPUT " + quoteForCMake(targetList.str()) + " CONTENT "
+           + quoteForCMake("$<TARGET_OBJECTS:" + decision.target + ">") + ")\n"
+           + createPropertySetting(
+               decision.target, "RULE_LAUNCH_COMPILE", quoteForCMake(launcher));
 }
 
 std::string createHitSnippet(const CommandOptions& options,
@@ -373,8 +387,12 @@ std::string createStoringSnippet(const CommandOptions& options,
         if (storing.empty())
             continue;
 
-        auto launcher = createLauncher(options, "store-libraries") + storing + " -- "
-                        + findField(fields, "EXISTING_LINK_LAUNCHER");
+        auto launcher = createLauncher(options, "store-libraries");
+
+        for (const auto& argument: createSizeLimitArguments(options))
+            launcher += " " + quoteForShell(argument);
+
+        launcher += storing + " -- " + findField(fields, "EXISTING_LINK_LAUNCHER");
         snippet += createPropertySetting(
             target, "RULE_LAUNCH_LINK", quoteForCMake(launcher));
     }
@@ -578,6 +596,13 @@ eacp::Vector<std::string> createSharedArguments(const CommandOptions& options)
     if (!options.libraryCacheLocation.empty())
         arguments.add("--library-cache-location=" + options.libraryCacheLocation);
 
+    return arguments;
+}
+
+eacp::Vector<std::string> createSizeLimitArguments(const CommandOptions& options)
+{
+    auto arguments = eacp::Vector<std::string> {};
+
     if (!options.libraryCacheMaxSize.empty())
         arguments.add("--library-cache-max-size=" + options.libraryCacheMaxSize);
 
@@ -586,6 +611,19 @@ eacp::Vector<std::string> createSharedArguments(const CommandOptions& options)
                       + options.libraryCacheLocationMaxSize);
 
     return arguments;
+}
+
+eacp::FilePath getStoredObjectListPath(const eacp::FilePath& buildDirectory,
+                                       const std::string& key)
+{
+    return getLibraryCacheDirectory(buildDirectory) / "objects" / (key + ".txt");
+}
+
+eacp::FilePath getTargetObjectListPath(const eacp::FilePath& buildDirectory,
+                                       const std::string& key)
+{
+    return getLibraryCacheDirectory(buildDirectory) / "objects"
+           / (key + ".target.txt");
 }
 
 std::string quoteForShell(const std::string& text)
@@ -702,6 +740,11 @@ void writeLibraryCacheFiles(const CommandOptions& options,
 
     for (const auto& decision: plan.decisions)
     {
+        if (decision.cached && decision.kind == CachedTargetKind::objectLibrary)
+            writeFileIfChanged(
+                getStoredObjectListPath(options.buildDirectory, decision.key.key),
+                listStoredObjects(*decision.cached));
+
         writeFileIfChanged(getInputsPath(options.buildDirectory, decision.key.key),
                            decision.key.inputs);
         writeFileIfChanged(

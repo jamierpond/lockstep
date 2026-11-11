@@ -220,12 +220,14 @@ void addBehaviourOptions(eacp::Args::Parser& parser,
     parser.option("--object-library",
                   options.objectLibraries,
                   "<key>=<object files> of an object library, for store-libraries");
-    parser.option("--stored-object",
-                  options.storedObjects,
-                  "a cached object file for use-cached-objects, in --objects order");
-    parser.option("--objects",
-                  options.objects,
-                  "the object library's object files, a ;-list, for "
+    parser.option(
+        "--stored-object-list",
+        options.storedObjectList,
+        "a file of the cached object files for use-cached-objects, one per "
+        "line in --object-list order");
+    parser.option("--object-list",
+                  options.objectList,
+                  "a file holding the object library's object files, a ;-list, for "
                   "use-cached-objects");
     parser.option("--object",
                   options.object,
