@@ -88,6 +88,11 @@ add_custom_command(OUTPUT "${generated}"
         COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/generated.h.in" "${generated}"
         DEPENDS generated.h.in)
 add_library(greeter STATIC greeter.cpp greeter_offset.c "${generated}")
+# Stands in for another compiler version, which the library cache records.
+if (DEFINED LOCKSTEP_TEST_COMPILER_VERSION)
+    set(CMAKE_C_COMPILER_VERSION "${LOCKSTEP_TEST_COMPILER_VERSION}")
+    set(CMAKE_CXX_COMPILER_VERSION "${LOCKSTEP_TEST_COMPILER_VERSION}")
+endif ()
 target_include_directories(greeter PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated"
         PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/config")
 ]=])

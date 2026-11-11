@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <stdexcept>
 #include <thread>
 
@@ -15,7 +16,6 @@ namespace lockstep
 {
 namespace
 {
-constexpr auto sshExecutable = "ssh";
 constexpr auto sshConnectTimeoutSeconds = 5;
 constexpr auto sshKeepAliveIntervalSeconds = 5;
 constexpr auto sshKeepAliveMissesBeforeGivingUp = 3;
@@ -27,39 +27,50 @@ constexpr auto homeDirectoryPrefix = std::string_view {"~/"};
 constexpr auto lacksMarker = std::string_view {"lockstep-location-lacks "};
 constexpr auto fetchedArchiveName = "fetched.tar";
 
-// Run by the host's sh with the format directory as $1, reading
-// "missing <key>" and "copied <key>" lines. It writes a tar of every missing
-// entry it holds to stdout and names every copied key it lacks on stderr.
+// Run by the host's sh with the format directory as $1 and, as $2, 1 when every
+// build of a missing key is wanted where the one asked for is not there. It
+// reads "missing <key> <build id>" and "copied <key> <build id>" lines, writes a
+// tar of every missing build it holds to stdout and names every copied build
+// it lacks on stderr.
 constexpr auto fetchScript = std::string_view {
-    "if cd \"$1\" 2>/dev/null; then held=1; else held=0; fi; found=; "
-    "while read kind key; do "
-    "if [ $held = 1 ] && [ -f \"$key/manifest.json\" ]; then "
-    "if [ \"$kind\" = missing ]; then found=\"$found $key\"; fi; "
-    "elif [ \"$kind\" = copied ]; then echo \"lockstep-location-lacks $key\" >&2; fi; "
+    "if cd \"$1\" 2>/dev/null; then held=1; else held=0; fi; others=$2; found=; "
+    "while read kind key build; do "
+    "if [ $held = 1 ] && [ -f \"$key/$build/manifest.json\" ]; then "
+    "if [ \"$kind\" = missing ]; then found=\"$found $key/$build\"; fi; "
+    "elif [ \"$kind\" = copied ]; then "
+    "echo \"lockstep-location-lacks $key/$build\" >&2; "
+    "elif [ $held = 1 ] && [ \"$others\" = 1 ] && [ -d \"$key\" ]; then "
+    "for entry in \"$key\"/*; do "
+    "if [ -f \"$entry/manifest.json\" ]; then found=\"$found $entry\"; fi; "
+    "done; "
+    "fi; "
     "done; "
     "if [ -n \"$found\" ]; then COPYFILE_DISABLE=1 exec tar -cf - $found; fi"};
 
-// Run by the host's sh with the format directory as $1 and the keys after it,
-// reading a tar of their entries. Each is unpacked beside the entries under a
-// random name and renamed into place, so a half-sent entry is never seen; when
-// another machine published the key first, its entry stays.
+// Run by the host's sh with the format directory as $1 and each build's
+// <key>/<build id> after it, reading a tar of them. Each is unpacked beside the
+// entries under a random name and renamed into place, so a half-sent build is
+// never seen; when another machine published it first, its copy stays, and a
+// rename that lost that race, which mv puts inside the winner, is deleted.
 constexpr auto sendScript = std::string_view {
     "mkdir -p \"$1\" && cd \"$1\" || exit 1; "
     "staging=$(mktemp -d .staging.XXXXXX) || exit 1; "
     "if ! tar -xf - -C \"$staging\"; then rm -rf \"$staging\"; exit 1; fi; "
     "shift; status=0; "
-    "for key do "
-    "if [ ! -d \"$key\" ]; then mv \"$staging/$key\" . 2>/dev/null; fi; "
-    "if [ ! -f \"$key/manifest.json\" ]; then status=1; fi; "
+    "for entry do "
+    "if [ ! -d \"$entry\" ]; then "
+    "mkdir -p \"${entry%/*}\" && mv \"$staging/$entry\" \"$entry\" 2>/dev/null; fi; "
+    "if [ -d \"$entry/${entry#*/}\" ]; then rm -rf \"$entry/${entry#*/}\"; fi; "
+    "if [ ! -f \"$entry/manifest.json\" ]; then status=1; fi; "
     "done; "
     "rm -rf \"$staging\"; exit $status"};
 
-// One of the scripts above, run on the host with the keys after the format
+// One of the scripts above, run on the host with the arguments after the format
 // directory and `input` on its stdin.
 struct SshScriptRun
 {
     std::string_view script;
-    std::vector<std::string> keys;
+    std::vector<std::string> arguments;
     std::string input;
     std::chrono::seconds timeLimit;
 };
@@ -109,11 +120,11 @@ FinishedProcess runWithTimeLimit(eacp::Processes::ProcessOptions options,
     return {exitCode, process.output(), process.errorOutput()};
 }
 
-// What the host's script and ssh wrote to stderr: the keys the location lacks,
-// and every other line, which explains a failure.
+// What the host's script and ssh wrote to stderr: the builds the location
+// lacks, and every other line, which explains a failure.
 struct SshErrorOutput
 {
-    std::vector<std::string> keysLocationLacks;
+    std::vector<EntryAddress> locationLacks;
     eacp::Vector<std::string> otherLines;
 };
 
@@ -124,9 +135,13 @@ SshErrorOutput parseErrorOutput(const FinishedProcess& finished)
     for (const auto& line: eacp::Strings::split(finished.errorOutput, '\n'))
     {
         auto trimmed = eacp::Strings::trim(line);
+        auto lacked = std::optional<EntryAddress> {};
 
         if (trimmed.starts_with(lacksMarker))
-            parsed.keysLocationLacks.push_back(trimmed.substr(lacksMarker.size()));
+            lacked = parseEntryAddress(trimmed.substr(lacksMarker.size()));
+
+        if (lacked)
+            parsed.locationLacks.push_back(*lacked);
         else if (!trimmed.empty())
             parsed.otherLines.add(trimmed);
     }
@@ -152,12 +167,13 @@ void runCMakeTar(const eacp::FilePath& cmake,
 }
 
 void copyEntryOutOfStore(const LibraryStore& store,
-                         const std::string& key,
+                         const EntryAddress& address,
                          const eacp::FilePath& destination)
 {
-    auto entry = store.getFormatDirectory() / key;
+    auto entry = store.getFormatDirectory() / address.key / address.buildId;
+    auto copy = destination / address.key / address.buildId;
 
-    if (!eacp::Files::copyDirectory(entry, destination / key))
+    if (!eacp::Files::copyDirectory(entry, copy))
         throw std::runtime_error("cannot copy " + entry.str() + " into "
                                  + destination.str());
 }
@@ -201,12 +217,15 @@ std::optional<std::string> findReasonInStoredFile(const eacp::FilePath& entry,
     return std::nullopt;
 }
 
-std::optional<std::string> findReasonToDiscard(const std::string& key,
+std::optional<std::string> findReasonToDiscard(const EntryAddress& address,
                                                const eacp::FilePath& entry,
                                                const LibraryManifest& manifest)
 {
-    if (computeSha256Hex(manifest.inputs) != key)
+    if (computeSha256Hex(manifest.inputs) != address.key)
         return "the key inputs in its manifest do not hash to its key";
+
+    if (computeBuildId(manifest.builtWith) != address.buildId)
+        return "the record of what built it does not hash to its build id";
 
     for (const auto& file: manifest.files)
     {
@@ -219,7 +238,34 @@ std::optional<std::string> findReasonToDiscard(const std::string& key,
 
 EntryToStore createEntryToStore(const StoredEntry& stored)
 {
-    return {stored.manifest.kind, stored.getFilePaths(), stored.manifest.inputs};
+    return {stored.manifest.kind,
+            stored.getFilePaths(),
+            stored.manifest.inputs,
+            stored.manifest.builtWith};
+}
+
+// Every build directory a fetch put under `staging`, as <key>/<build id>.
+std::vector<EntryAddress> listFetchedBuilds(const eacp::FilePath& staging,
+                                            const LibraryFetchRequest& request)
+{
+    auto addresses = std::vector<EntryAddress> {};
+    auto keys = std::set<std::string> {};
+
+    for (const auto& missing: request.missing)
+        keys.insert(missing.key);
+
+    for (const auto& key: keys)
+    {
+        for (const auto& build: eacp::Files::listDirectory(staging / key, {}))
+        {
+            auto address = parseEntryAddress(key + "/" + build.path.fileName());
+
+            if (address && build.kind == eacp::Files::EntryKind::directory)
+                addresses.push_back(*address);
+        }
+    }
+
+    return addresses;
 }
 } // namespace
 
@@ -230,13 +276,14 @@ class LibraryCacheTransport
 public:
     virtual ~LibraryCacheTransport() = default;
 
-    // Copies each missing key's entry the location holds into
-    // `destination/<key>/`, and returns the copied keys the location lacks.
-    virtual std::vector<std::string>
+    // Copies each build the request fetches that the location holds into
+    // `destination/<key>/<build id>/`, and returns the copied builds the
+    // location lacks.
+    virtual std::vector<EntryAddress>
         fetch(const LibraryFetchRequest& request,
               const eacp::FilePath& destination) const = 0;
 
-    virtual void send(const std::vector<std::string>& keys,
+    virtual void send(const std::vector<EntryAddress>& addresses,
                       const LibraryStore& localCopies) const = 0;
 };
 
@@ -250,52 +297,61 @@ public:
     {
     }
 
-    std::vector<std::string> fetch(const LibraryFetchRequest& request,
-                                   const eacp::FilePath& destination) const override
+    std::vector<EntryAddress> fetch(const LibraryFetchRequest& request,
+                                    const eacp::FilePath& destination) const override
     {
-        for (const auto& key: request.missingKeys)
-            copyEntry(key, destination / key);
+        for (const auto& address: request.missing)
+            copyMissingBuild(address, request.fetchesOtherBuilds, destination);
 
-        auto lacks = std::vector<std::string> {};
-
-        for (const auto& key: request.copiedKeys)
-        {
-            if (!store.findEntry(key))
-                lacks.push_back(key);
-        }
-
+        auto lacks = std::vector<EntryAddress> {};
+        auto isLacked = [&](const EntryAddress& address)
+        { return !store.findEntry(address); };
+        std::ranges::copy_if(request.copied, std::back_inserter(lacks), isLacked);
         return lacks;
     }
 
-    void send(const std::vector<std::string>& keys,
+    void send(const std::vector<EntryAddress>& addresses,
               const LibraryStore& localCopies) const override
     {
-        for (const auto& key: keys)
+        for (const auto& address: addresses)
         {
-            if (auto stored = localCopies.findEntry(key))
-                store.storeEntry(key, createEntryToStore(*stored));
+            if (auto stored = localCopies.findEntry(address))
+                store.storeEntry(address.key, createEntryToStore(*stored));
         }
     }
 
 private:
-    void copyEntry(const std::string& key, const eacp::FilePath& destination) const
+    void copyMissingBuild(const EntryAddress& address,
+                          bool fetchesOtherBuilds,
+                          const eacp::FilePath& destination) const
     {
-        auto stored = store.findEntry(key);
+        if (auto stored = store.findEntry(address))
+            copyEntry(*stored, destination);
+        else if (fetchesOtherBuilds)
+            copyEveryBuild(address.key, destination);
+    }
 
-        if (!stored)
-            return;
+    void copyEveryBuild(const std::string& key,
+                        const eacp::FilePath& destination) const
+    {
+        for (const auto& stored: store.listBuilds(key))
+            copyEntry(stored, destination);
+    }
 
-        auto isCopied =
-            eacp::Files::copyFile(getLibraryManifestPath(stored->directory),
-                                  getLibraryManifestPath(destination));
+    static void copyEntry(const StoredEntry& stored,
+                          const eacp::FilePath& destination)
+    {
+        auto copy = destination / stored.address.key / stored.address.buildId;
+        auto isCopied = eacp::Files::copyFile(
+            getLibraryManifestPath(stored.directory), getLibraryManifestPath(copy));
 
-        for (const auto& file: stored->getFilePaths())
-            isCopied = isCopied
-                       && eacp::Files::copyFile(file, destination / file.fileName());
+        for (const auto& file: stored.getFilePaths())
+            isCopied =
+                isCopied && eacp::Files::copyFile(file, copy / file.fileName());
 
         if (!isCopied)
-            throw std::runtime_error("cannot copy " + stored->directory.str()
-                                     + " into " + destination.str());
+            throw std::runtime_error("cannot copy " + stored.directory.str()
+                                     + " into " + copy.str());
     }
 
     LibraryStore store;
@@ -305,26 +361,30 @@ class SshTransport final : public LibraryCacheTransport
 {
 public:
     SshTransport(const LibraryCacheLocation& location,
-                 const eacp::FilePath& cmakeToUse)
+                 const eacp::FilePath& cmakeToUse,
+                 const std::string& sshExecutableToUse)
         : host(location.sshHost)
         , formatDirectory(getSshDirectory(location.directory) + "/"
                           + getLibraryFormatDirectoryName())
         , cmake(cmakeToUse)
+        , sshExecutable(sshExecutableToUse)
     {
     }
 
-    std::vector<std::string> fetch(const LibraryFetchRequest& request,
-                                   const eacp::FilePath& destination) const override
+    std::vector<EntryAddress> fetch(const LibraryFetchRequest& request,
+                                    const eacp::FilePath& destination) const override
     {
         auto input = std::string {};
 
-        for (const auto& key: request.missingKeys)
-            input += "missing " + key + "\n";
+        for (const auto& address: request.missing)
+            input += "missing " + address.key + " " + address.buildId + "\n";
 
-        for (const auto& key: request.copiedKeys)
-            input += "copied " + key + "\n";
+        for (const auto& address: request.copied)
+            input += "copied " + address.key + " " + address.buildId + "\n";
 
-        auto finished = runSsh({fetchScript, {}, input, fetchTimeLimit});
+        auto fetchesOtherBuilds = request.fetchesOtherBuilds ? "1" : "0";
+        auto finished =
+            runSsh({fetchScript, {fetchesOtherBuilds}, input, fetchTimeLimit});
 
         if (!finished.output.empty())
         {
@@ -334,10 +394,10 @@ public:
             eacp::Files::removeFile(archive);
         }
 
-        return parseErrorOutput(finished).keysLocationLacks;
+        return parseErrorOutput(finished).locationLacks;
     }
 
-    void send(const std::vector<std::string>& keys,
+    void send(const std::vector<EntryAddress>& addresses,
               const LibraryStore& localCopies) const override
     {
         // tar runs in a copy outside the cache: Windows cannot delete a
@@ -347,16 +407,18 @@ public:
         eacp::Files::createDirectories(staging.path());
         auto archive = eacp::TemporaryFile {".tar"};
         auto arguments = eacp::Vector<std::string> {"cf", archive.path().str()};
+        auto paths = std::vector<std::string> {};
 
-        for (const auto& key: keys)
+        for (const auto& address: addresses)
         {
-            copyEntryOutOfStore(localCopies, key, staging.path());
-            arguments.add(key);
+            copyEntryOutOfStore(localCopies, address, staging.path());
+            arguments.add(address.getPath());
+            paths.push_back(address.getPath());
         }
 
         runCMakeTar(cmake, arguments, staging.path());
         runSsh({sendScript,
-                keys,
+                paths,
                 eacp::Files::readFile(archive.path()),
                 sendTimeLimit});
     }
@@ -367,8 +429,8 @@ private:
         auto commandOnHost = "sh -c '" + std::string {run.script} + "' lockstep '"
                              + formatDirectory + "'";
 
-        for (const auto& key: run.keys)
-            commandOnHost += " " + key;
+        for (const auto& argument: run.arguments)
+            commandOnHost += " " + argument;
 
         auto options = eacp::Processes::ProcessOptions {};
         options.executable = sshExecutable;
@@ -408,14 +470,16 @@ private:
     std::string host;
     std::string formatDirectory;
     eacp::FilePath cmake;
+    std::string sshExecutable;
 };
 
 std::shared_ptr<const LibraryCacheTransport>
     createTransport(const LibraryCacheLocation& location,
-                    const eacp::FilePath& cmake)
+                    const eacp::FilePath& cmake,
+                    const std::string& sshExecutable)
 {
     if (location.kind == LibraryCacheLocationKind::ssh)
-        return std::make_shared<SshTransport>(location, cmake);
+        return std::make_shared<SshTransport>(location, cmake, sshExecutable);
 
     return std::make_shared<DirectoryTransport>(eacp::FilePath {location.directory});
 }
@@ -445,9 +509,11 @@ std::optional<LibraryCacheLocation>
 }
 
 LibraryCacheAtLocation::LibraryCacheAtLocation(
-    const LibraryCacheLocation& locationToUse, const eacp::FilePath& cmake)
+    const LibraryCacheLocation& locationToUse,
+    const eacp::FilePath& cmake,
+    const std::string& sshExecutable)
     : location(locationToUse)
-    , transport(createTransport(locationToUse, cmake))
+    , transport(createTransport(locationToUse, cmake, sshExecutable))
 {
 }
 
@@ -458,33 +524,35 @@ LibraryFetchResult
     auto staging = eacp::TemporaryFile {".fetched"};
     eacp::Files::createDirectories(staging.path());
     auto result = LibraryFetchResult {};
-    result.keysLocationLacks = transport->fetch(request, staging.path());
+    result.locationLacks = transport->fetch(request, staging.path());
 
-    for (const auto& key: request.missingKeys)
+    for (const auto& address: listFetchedBuilds(staging.path(), request))
     {
-        auto entry = staging.path() / key;
+        auto entry = staging.path() / address.key / address.buildId;
         auto manifest = readLibraryManifest(entry);
 
         if (!manifest)
             continue;
 
-        if (auto reason = findReasonToDiscard(key, entry, *manifest))
+        if (auto reason = findReasonToDiscard(address, entry, *manifest))
         {
-            result.discarded.push_back({key, *reason});
+            result.discarded.push_back({address, *reason});
             continue;
         }
 
-        localCopies.storeEntry(key, createEntryToStore({entry, *manifest}));
-        result.fetchedKeys.insert(key);
+        localCopies.storeEntry(address.key,
+                               createEntryToStore({address, entry, *manifest}));
+        result.fetched.insert(address);
     }
 
     return result;
 }
 
-void LibraryCacheAtLocation::sendLibraries(const std::vector<std::string>& keys,
-                                           const LibraryStore& localCopies) const
+void LibraryCacheAtLocation::sendLibraries(
+    const std::vector<EntryAddress>& addresses,
+    const LibraryStore& localCopies) const
 {
-    if (!keys.empty())
-        transport->send(keys, localCopies);
+    if (!addresses.empty())
+        transport->send(addresses, localCopies);
 }
 } // namespace lockstep

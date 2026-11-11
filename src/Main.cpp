@@ -1,5 +1,6 @@
 #include "Commands.h"
 #include "PackageArguments.h"
+#include "LibraryCacheSettings.h"
 #include "LockFile.h"
 #include "PackageCache.h"
 #include "PinnedRelease.h"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <map>
 #include <stdexcept>
 
 namespace
@@ -153,9 +155,20 @@ std::string getLibraryCacheLocation(const lockstep::CommandOptions& options)
     return eacp::getEnvValue("LOCKSTEP_LIBRARY_CACHE_LOCATION");
 }
 
+std::map<std::string, std::string> readSettingEnvironment()
+{
+    auto environment = std::map<std::string, std::string> {};
+
+    for (const auto& name: lockstep::getSettingVariableNames())
+        environment[name] = eacp::getEnvValue(name);
+
+    return environment;
+}
+
 int runCommand(lockstep::CommandOptions options)
 {
     options.cache = getCacheDirectory(options.cache);
+    options.settingEnvironment = readSettingEnvironment();
     options.libraryCacheLocation = getLibraryCacheLocation(options);
     options.lock = getLockFile(options);
 
@@ -232,6 +245,10 @@ void addBehaviourOptions(eacp::Args::Parser& parser,
                   options.libraryCacheLocation,
                   "a directory or [user@]host:directory holding the library cache, "
                   "which the build passes on from LOCKSTEP_LIBRARY_CACHE_LOCATION");
+    parser.option("--cache-variable",
+                  options.cacheVariables,
+                  "<name>=<value> of a library cache setting the build directory "
+                  "defines, for begin and library-cache");
     parser.option(
         "--top-level-includes",
         options.topLevelIncludes,

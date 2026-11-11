@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BuiltWith.h"
 #include "ConfigureDescription.h"
 
 #include <optional>
@@ -24,6 +25,13 @@ std::optional<std::string>
 
 std::optional<std::string>
     findReasonInSplitDebugInformation(const ConfigureDescription& description,
+                                      const std::string& target);
+
+// What the target's objects hold besides machine code: with link-time
+// optimisation (-flto in any form, INTERPROCEDURAL_OPTIMIZATION or MSVC's /GL)
+// the compiler's intermediate code, which GCC and MSVC read back only at the
+// version that wrote it, and Clang at that version or newer.
+IntermediateCode findIntermediateCode(const ConfigureDescription& description,
                                       const std::string& target);
 
 // True when every language the target compiles has its cache directory paths

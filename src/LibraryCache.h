@@ -16,7 +16,7 @@ namespace lockstep
 {
 // Raised whenever what goes into a key or the store's files change meaning, so
 // no older entry hits and the store reads no older file.
-constexpr auto libraryCacheFormatVersion = 6;
+constexpr auto libraryCacheFormatVersion = 7;
 
 // The kind of entry a target of this TYPE is stored as, or nullopt for a type
 // the cache does not store.

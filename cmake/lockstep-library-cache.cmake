@@ -30,7 +30,7 @@ set(_lockstep_target_properties
         INSTALL_RPATH INSTALL_NAME_DIR MACOSX_RPATH MACOSX_BUNDLE WIN32_EXECUTABLE
         ENABLE_EXPORTS OUTPUT_NAME SUFFIX PREFIX VERSION)
 # Read for the build type in use, as <property>_<CONFIG>.
-set(_lockstep_configuration_target_properties LINK_FLAGS OUTPUT_NAME)
+set(_lockstep_configuration_target_properties LINK_FLAGS OUTPUT_NAME INTERPROCEDURAL_OPTIMIZATION)
 # Read on an imported target, plain and for each of its configurations.
 set(_lockstep_imported_target_properties
         IMPORTED_LOCATION IMPORTED_IMPLIB IMPORTED_OBJECTS IMPORTED_SONAME IMPORTED_NO_SONAME
@@ -361,14 +361,8 @@ function(_lockstep_apply_library_cache)
     set(input "${CMAKE_BINARY_DIR}/_lockstep/library-cache/targets.txt")
     file(WRITE "${input}" "${records}")
     set(output "${CMAKE_BINARY_DIR}/_lockstep/library-cache/apply.cmake")
-    # A -DLOCKSTEP_LIBRARY_CACHE_LOCATION on the build directory, even an empty
-    # one, wins over the environment variable, as LOCKSTEP_LIBRARY_CACHE does.
-    set(location "$ENV{LOCKSTEP_LIBRARY_CACHE_LOCATION}")
-    if (DEFINED CACHE{LOCKSTEP_LIBRARY_CACHE_LOCATION})
-        set(location "${LOCKSTEP_LIBRARY_CACHE_LOCATION}")
-    endif ()
     execute_process(COMMAND ${_LOCKSTEP_COMMAND} library-cache "--input=${input}" "--output=${output}"
-            "--library-cache-location=${location}"
+            ${_lockstep_cache_variables}
             RESULT_VARIABLE _lockstep_result ERROR_VARIABLE _lockstep_error)
     _lockstep_report()
     include("${output}")

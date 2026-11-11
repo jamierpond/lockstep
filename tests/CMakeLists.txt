@@ -1,7 +1,7 @@
 lockstep_add_package(NAME NanoTest GITHUB eyalamirmusic/NanoTest GIT_TAG main)
 
 nano_add_executable(LockstepTests
-        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp ExecutableCacheTests.cpp
+        SOURCES Main.cpp Sha256Tests.cpp MerkleHashTests.cpp LockFileTests.cpp PinnedReleaseTests.cpp PackageArgumentsTests.cpp MessagesTests.cpp LibraryCacheTests.cpp ExecutableCacheTests.cpp ToolchainRangeTests.cpp CompilerExecutableTests.cpp LocationOverSshTests.cpp
         TARGETS lockstep-lib
         NO_MAIN)
 target_compile_definitions(LockstepTests PRIVATE
@@ -81,6 +81,15 @@ if (NOT is_multi_config)
             "-DGENERATOR=${CMAKE_GENERATOR}"
             "-DMSVC_ABI=${MSVC}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/RunLibraryCacheProject.cmake)
+
+    add_test(NAME Consumer/libraryCacheRanges
+            COMMAND ${CMAKE_COMMAND}
+            -DPROJECT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/projects/library-cache
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/consumer-library-cache-ranges
+            -DLOCKSTEP_EXECUTABLE=$<TARGET_FILE:lockstep>
+            -DLOCKSTEP_SHIM=${PROJECT_SOURCE_DIR}/cmake/lockstep.cmake
+            "-DGENERATOR=${CMAKE_GENERATOR}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunLibraryCacheRangesProject.cmake)
 
     function(add_library_cache_location_test name)
         add_test(NAME Consumer/${name}

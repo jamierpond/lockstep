@@ -39,27 +39,37 @@ std::optional<LibraryCacheLocation>
 
 struct LibraryFetchRequest
 {
-    // Keys this machine has no copy of: fetched when the location holds them.
-    std::vector<std::string> missingKeys;
+    // This machine's own builds of the keys it has no copy of: fetched when the
+    // location holds them.
+    std::vector<EntryAddress> missing;
 
-    // Keys this machine has a copy of: the result names those the location lacks.
-    std::vector<std::string> copiedKeys;
+    // When a range is set: for a missing build the location lacks, every
+    // build it holds of that key, for this machine to choose from.
+    bool fetchesOtherBuilds = false;
+
+    // Builds this machine has a copy of: the result names those the location
+    // lacks.
+    std::vector<EntryAddress> copied;
 };
 
 struct DiscardedLibrary
 {
-    std::string key;
+    EntryAddress address;
     std::string reason;
 };
 
 struct LibraryFetchResult
 {
-    std::set<std::string> fetchedKeys;
+    std::set<EntryAddress> fetched;
     std::vector<DiscardedLibrary> discarded;
-    std::vector<std::string> keysLocationLacks;
+    std::vector<EntryAddress> locationLacks;
 };
 
 class LibraryCacheTransport;
+
+// ssh for a location over ssh, unless a caller names another program that takes
+// ssh's arguments.
+constexpr auto defaultSshExecutable = "ssh";
 
 // The library cache at a location, which lockstep copies libraries from and to.
 // The linker needs a file on this disk, so every library fetched from it is
@@ -68,17 +78,20 @@ class LibraryCacheAtLocation
 {
 public:
     LibraryCacheAtLocation(const LibraryCacheLocation& location,
-                           const eacp::FilePath& cmake);
+                           const eacp::FilePath& cmake,
+                           const std::string& sshExecutable = defaultSshExecutable);
 
-    // One round trip: copies every missing key the location holds into
-    // `localCopies`, after checking it against its manifest, and learns which
-    // copied keys the location lacks. Throws when the location cannot be reached.
+    // One round trip: copies every missing build the location holds (and,
+    // when the request says so, the other builds of a missing key) into
+    // `localCopies`, after checking each against its manifest, and learns
+    // which copied builds the location lacks. Throws when the location cannot
+    // be reached.
     LibraryFetchResult fetchLibraries(const LibraryFetchRequest& request,
                                       const LibraryStore& localCopies) const;
 
-    // Copies the entries of `keys` from `localCopies` to the location, each
-    // published whole under its key. Throws when the location cannot be reached.
-    void sendLibraries(const std::vector<std::string>& keys,
+    // Copies the builds from `localCopies` to the location, each published
+    // whole under its key. Throws when the location cannot be reached.
+    void sendLibraries(const std::vector<EntryAddress>& addresses,
                        const LibraryStore& localCopies) const;
 
     const LibraryCacheLocation& getLocation() const { return location; }

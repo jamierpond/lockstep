@@ -69,6 +69,7 @@ struct ExecutableCheck
 {
     std::optional<std::string> reason;
     std::string key;
+    std::string buildId;
     std::string greeterKey;
 };
 
@@ -87,12 +88,15 @@ ExecutableCheck checkExecutable(const SampleExecutable& tool,
 
     if (!lockstep::findReasonNotToCache(inputs, "greeter"))
     {
-        greeterKey = lockstep::computeLibraryKey(inputs, "greeter").key;
-        libraryKeys["greeter"] = greeterKey;
+        auto greeter = lockstep::computeLibraryKey(inputs, "greeter");
+        greeterKey = greeter.key;
+        libraryKeys["greeter"] = {greeter.key, greeter.buildId};
     }
 
+    auto key = lockstep::computeExecutableKey(inputs, "tool", libraryKeys);
     return {lockstep::findReasonNotToCacheExecutable(inputs, "tool", libraryKeys),
-            lockstep::computeExecutableKey(inputs, "tool", libraryKeys).key,
+            key.key,
+            key.buildId,
             greeterKey};
 }
 
@@ -139,7 +143,8 @@ auto tExecutableKeyFollowsLink =
 
     check(plain.key != checkExecutable(withLinkOptions).key);
     check(plain.key != checkExecutable(withLinkerFlags).key);
-    check(plain.key != checkExecutable(otherLinker).key);
+    check(plain.key == checkExecutable(otherLinker).key);
+    check(plain.buildId != checkExecutable(otherLinker).buildId);
 };
 
 auto tLibraryKeyIgnoresLink = test("LibraryCache/keyIgnoresLinkSettings") = []

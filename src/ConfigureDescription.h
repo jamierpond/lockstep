@@ -1,5 +1,6 @@
 #pragma once
 
+#include <compare>
 #include <map>
 #include <optional>
 #include <set>
@@ -68,12 +69,27 @@ struct MachinePaths
     std::string cacheDirectory;
 };
 
+// A compiler as a configure names it: CMAKE_<LANG>_COMPILER and
+// CMAKE_<LANG>_COMPILER_ID.
+struct ConfiguredCompiler
+{
+    std::string language;
+    std::string compilerId;
+    std::string path;
+
+    auto operator<=>(const ConfiguredCompiler&) const = default;
+};
+
+// The SHA-256 of each compiler's executable files; see CompilerExecutable.h.
+using CompilerExecutableHashes = std::map<ConfiguredCompiler, std::string>;
+
 struct LibraryCacheInputs
 {
     const ConfigureDescription& description;
     const std::vector<ConfiguredPackage>& packages;
     const PackageVariableNames& variableNames;
     MachinePaths paths;
+    CompilerExecutableHashes compilerExecutableHashes {};
 };
 
 std::optional<ConfiguredPackage>

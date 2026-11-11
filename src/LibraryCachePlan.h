@@ -22,6 +22,12 @@ struct LibraryDecision
     LibraryKey key;
     std::optional<StoredEntry> cached;
     bool isFetched = false;
+
+    // Why each stored build of the key that is not taken was refused.
+    std::vector<std::string> refusals;
+
+    // A hit on a build another toolchain made, which a range admitted.
+    bool isBuiltByAnotherToolchain() const;
 };
 
 struct SkippedLibrary
@@ -37,20 +43,42 @@ struct LibraryCachePlan
     std::vector<SkippedLibrary> skipped;
 };
 
-// The stored entry for `key`, when it is there whole and holds `kind`.
-std::optional<StoredEntry> findEntryOfKind(const LibraryStore& store,
-                                           const std::string& key,
-                                           CachedTargetKind kind);
+// Which stored build of a key a lookup takes, and why it refused the others.
+struct BuildChoice
+{
+    std::optional<StoredEntry> entry;
+    std::vector<std::string> refusals;
+};
+
+// This machine's own build of the key when it is stored, else the newest
+// build the ranges admit; only builds that are whole and hold `kind` count.
+BuildChoice chooseStoredBuild(const LibraryStore& store,
+                              const LibraryKey& key,
+                              CachedTargetKind kind,
+                              const ToolchainRanges& ranges);
+
+// What a configure plans from: the targets, this machine's store and the
+// ranges of other toolchains' builds it takes.
+struct LibraryCachePlanning
+{
+    const LibraryCacheInputs& inputs;
+    const LibraryStore& store;
+    ToolchainRanges ranges;
+};
 
 // Keys every static and object library of a locked package first, then every
 // executable, whose key covers the keys of the libraries it links.
-LibraryCachePlan planLibraryCache(const LibraryCacheInputs& inputs,
-                                  const LibraryStore& store);
+LibraryCachePlan planLibraryCache(const LibraryCachePlanning& planning);
 
 eacp::FilePath getLibraryCacheDirectory(const eacp::FilePath& buildDirectory);
 
 eacp::FilePath getInputsPath(const eacp::FilePath& buildDirectory,
                              const std::string& key);
+
+// Where the configure writes the record of this machine's build of `key`,
+// which the link that stores it reads.
+eacp::FilePath getBuiltWithPath(const eacp::FilePath& buildDirectory,
+                                const std::string& key);
 
 // The lockstep the CMake module runs, from LOCKSTEP_EXECUTABLE.
 std::string getLockstepExecutable();

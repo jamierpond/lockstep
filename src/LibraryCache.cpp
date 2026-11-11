@@ -1,4 +1,5 @@
 #include "LibraryCache.h"
+#include "BuiltWithFields.h"
 #include "CompileFlags.h"
 #include "KeyText.h"
 #include "PackageArguments.h"
@@ -281,6 +282,8 @@ LibraryKey computeLibraryKey(const LibraryCacheInputs& inputs,
         text.addCacheDirectory();
 
     auto filter = createKeyFieldFilter(inputs.description, target);
+    auto builtWith = moveBuiltWithFieldsOutOfKey(inputs, target, filter);
+    builtWith.intermediateCode = findIntermediateCode(inputs.description, target);
     addOwnTarget(text, inputs, target, filter);
 
     auto directory = findTargetField(inputs.description, target, "SOURCE_DIR");
@@ -290,7 +293,7 @@ LibraryKey computeLibraryKey(const LibraryCacheInputs& inputs,
     for (const auto& linked: collectLinkClosure(inputs.description, target))
         addTarget(text, inputs, linked, filter);
 
-    return {computeSha256Hex(text.getText()), text.getText()};
+    return createLibraryKey(text.getText(), builtWith);
 }
 
 std::set<std::string> collectUpperCaseIdentifiers(std::string_view text)

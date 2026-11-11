@@ -1,4 +1,5 @@
 #include "CompileFlags.h"
+#include "PackageArguments.h"
 
 #include <eacp/Core/Utils/Strings.h>
 
@@ -43,6 +44,17 @@ constexpr auto pathMappingFlags =
     std::array<PathMappingFlag, 3> {{{"-ffile-prefix-map=", true, true},
                                      {"-fmacro-prefix-map=", true, false},
                                      {"-fdebug-prefix-map=", false, true}}};
+
+constexpr auto linkTimeOptimisationFlag = std::string_view {"-flto"};
+constexpr auto wholeProgramFlags = std::array<std::string_view, 2> {"/GL", "-GL"};
+constexpr auto wholeProgramOffFlags =
+    std::array<std::string_view, 2> {"/GL-", "-GL-"};
+constexpr auto interproceduralOptimisationProperty =
+    std::string_view {"INTERPROCEDURAL_OPTIMIZATION"};
+
+// The compilers whose intermediate code only the version that wrote it reads.
+constexpr auto sameVersionOnlyCompilerIds =
+    std::array<std::string_view, 2> {"GNU", "MSVC"};
 
 constexpr auto rootDirectory = std::string_view {"/"};
 constexpr auto flagValueTerminators = std::string_view {" \t\n;\""};
@@ -281,6 +293,43 @@ std::vector<std::string>
     return texts;
 }
 
+bool hasWholeProgramFlag(std::string text)
+{
+    for (auto flag: wholeProgramOffFlags)
+        text = replaceAll(text, flag, {});
+
+    auto isInText = [&](std::string_view flag) { return containsFlag(text, flag); };
+    return std::ranges::any_of(wholeProgramFlags, isInText);
+}
+
+bool asksForInterproceduralOptimisation(const ConfigureDescription& description,
+                                        const std::string& target,
+                                        const RecordFields& directoryFields)
+{
+    auto property = std::string {interproceduralOptimisationProperty};
+    auto configuration = toUpperCase(findField(directoryFields, "CMAKE_BUILD_TYPE"));
+
+    return isCMakeTrue(findTargetField(description, target, property))
+           || isCMakeTrue(
+               findTargetField(description, target, property + "_" + configuration));
+}
+
+bool isReadBySameCompilerVersionOnly(
+    const RecordFields& directoryFields,
+    const std::vector<std::string>& compiledLanguages)
+{
+    for (const auto& language: compiledLanguages)
+    {
+        auto compilerId =
+            findField(directoryFields, "CMAKE_" + language + "_COMPILER_ID");
+
+        if (std::ranges::find(sameVersionOnlyCompilerIds, compilerId)
+            != sameVersionOnlyCompilerIds.end())
+            return true;
+    }
+
+    return false;
+}
 } // namespace
 
 bool containsFlag(std::string_view text, std::string_view flag)
@@ -366,6 +415,34 @@ std::optional<std::string>
     }
 
     return std::nullopt;
+}
+
+IntermediateCode findIntermediateCode(const ConfigureDescription& description,
+                                      const std::string& target)
+{
+    auto directory = findTargetField(description, target, "SOURCE_DIR");
+    const auto& directoryFields = findSubject(description.directories, directory);
+    auto compiledLanguages =
+        splitCMakeList(findTargetField(description, target, "COMPILED_LANGUAGES"));
+    auto texts = collectCompileFlagTexts(description, target, directoryFields);
+    auto isMsvcAbi = compilesForMsvcAbi(directoryFields, compiledLanguages);
+    auto hasWholeProgram =
+        isMsvcAbi && std::ranges::any_of(texts, hasWholeProgramFlag);
+    auto hasLinkTimeOptimisation = [](const std::string& text)
+    { return containsFlag(text, linkTimeOptimisationFlag); };
+
+    auto isOptimisedAtLink =
+        hasWholeProgram || std::ranges::any_of(texts, hasLinkTimeOptimisation)
+        || asksForInterproceduralOptimisation(description, target, directoryFields);
+
+    if (!isOptimisedAtLink)
+        return IntermediateCode::none;
+
+    if (hasWholeProgram
+        || isReadBySameCompilerVersionOnly(directoryFields, compiledLanguages))
+        return IntermediateCode::readableBySameCompilerVersionOnly;
+
+    return IntermediateCode::readableByNewerCompilers;
 }
 
 bool isCacheDirectoryMappedAway(const LibraryCacheInputs& inputs,

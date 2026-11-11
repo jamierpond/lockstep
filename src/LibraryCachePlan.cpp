@@ -8,6 +8,8 @@
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/Strings.h>
 
+#include <Miro/Json.h>
+
 #include <algorithm>
 #include <array>
 #include <map>
@@ -30,6 +32,7 @@ constexpr auto linkingTargetTypes = std::array<std::string_view, 3> {
 struct KindCounts
 {
     int hits = 0;
+    int otherToolchainHits = 0;
     int misses = 0;
     int skipped = 0;
 };
@@ -56,6 +59,42 @@ void writeFileIfChanged(const eacp::FilePath& path, std::string_view text)
     eacp::Files::writeFile(path, text);
 }
 
+// The entry holds `kind`: one file, unless it is an object library's objects.
+bool holdsKind(const StoredEntry& entry, CachedTargetKind kind)
+{
+    if (entry.manifest.kind != kind)
+        return false;
+
+    auto isOneFile = entry.manifest.files.size() == 1;
+    return kind == CachedTargetKind::objectLibrary || isOneFile;
+}
+
+bool isNewerThanChosen(const BuildChoice& choice, const StoredEntry& stored)
+{
+    if (!choice.entry)
+        return true;
+
+    return compareNewness(stored.manifest.builtWith,
+                          choice.entry->manifest.builtWith)
+           == std::strong_ordering::greater;
+}
+
+// Takes `stored` when the ranges admit it and it is newer than the build taken
+// so far, else records why not.
+void considerBuild(BuildChoice& choice,
+                   const StoredEntry& stored,
+                   const BuiltWith& thisMachine,
+                   const ToolchainRanges& ranges)
+{
+    auto reason =
+        findReasonToRefuseBuild(stored.manifest.builtWith, thisMachine, ranges);
+
+    if (reason)
+        choice.refusals.push_back(*reason);
+    else if (isNewerThanChosen(choice, stored))
+        choice.entry = stored;
+}
+
 bool isPackageTarget(const LibraryCacheInputs& inputs, const RecordFields& fields)
 {
     return !isCMakeTrue(findField(fields, "IMPORTED"))
@@ -75,11 +114,21 @@ std::optional<CachedTargetKind>
     return kind;
 }
 
+LibraryDecision decide(const LibraryCachePlanning& planning,
+                       const std::string& target,
+                       CachedTargetKind kind,
+                       const LibraryKey& key)
+{
+    auto choice = chooseStoredBuild(planning.store, key, kind, planning.ranges);
+    return {target, kind, key, choice.entry, false, choice.refusals};
+}
+
 void planLibraries(LibraryCachePlan& plan,
                    LinkedLibraryKeys& libraryKeys,
-                   const LibraryCacheInputs& inputs,
-                   const LibraryStore& store)
+                   const LibraryCachePlanning& planning)
 {
+    const auto& inputs = planning.inputs;
+
     for (const auto& [target, fields]: inputs.description.targets)
     {
         auto kind = findPackageLibraryKind(inputs, fields);
@@ -94,18 +143,20 @@ void planLibraries(LibraryCachePlan& plan,
         }
 
         auto key = computeLibraryKey(inputs, target);
-        libraryKeys[target] = key.key;
-        plan.decisions.push_back(
-            {target, *kind, key, findEntryOfKind(store, key.key, *kind)});
+        auto decision = decide(planning, target, *kind, key);
+        auto linkedBuildId =
+            decision.cached ? decision.cached->address.buildId : key.buildId;
+        libraryKeys[target] = {key.key, linkedBuildId};
+        plan.decisions.push_back(decision);
     }
 }
 
 void planExecutables(LibraryCachePlan& plan,
                      const LinkedLibraryKeys& libraryKeys,
-                     const LibraryCacheInputs& inputs,
-                     const LibraryStore& store)
+                     const LibraryCachePlanning& planning)
 {
     constexpr auto kind = CachedTargetKind::executable;
+    const auto& inputs = planning.inputs;
 
     for (const auto& [target, fields]: inputs.description.targets)
     {
@@ -120,8 +171,7 @@ void planExecutables(LibraryCachePlan& plan,
         }
 
         auto key = computeExecutableKey(inputs, target, libraryKeys);
-        plan.decisions.push_back(
-            {target, kind, key, findEntryOfKind(store, key.key, kind)});
+        plan.decisions.push_back(decide(planning, target, kind, key));
     }
 }
 
@@ -362,6 +412,9 @@ std::map<CachedTargetKind, KindCounts> countEachKind(const LibraryCachePlan& pla
             ++kindCounts.hits;
         else
             ++kindCounts.misses;
+
+        if (decision.isBuiltByAnotherToolchain())
+            ++kindCounts.otherToolchainHits;
     }
 
     for (const auto& skipped: plan.skipped)
@@ -370,10 +423,49 @@ std::map<CachedTargetKind, KindCounts> countEachKind(const LibraryCachePlan& pla
     return counts;
 }
 
+std::string describeHits(const KindCounts& counts)
+{
+    auto hits = std::to_string(counts.hits) + " hits";
+
+    if (counts.otherToolchainHits == 0)
+        return hits;
+
+    return hits + " (" + std::to_string(counts.otherToolchainHits)
+           + " built by another toolchain)";
+}
+
 std::string describeCounts(const KindCounts& counts)
 {
-    return std::to_string(counts.hits) + " hits, " + std::to_string(counts.misses)
-           + " misses, " + std::to_string(counts.skipped) + " skipped";
+    return describeHits(counts) + ", " + std::to_string(counts.misses) + " misses, "
+           + std::to_string(counts.skipped) + " skipped";
+}
+
+std::string describeHit(const LibraryDecision& decision)
+{
+    auto details = decision.key.key;
+
+    if (decision.isFetched)
+        details += ", fetched";
+
+    if (decision.isBuiltByAnotherToolchain())
+        details += "; built with "
+                   + describeDifferences(decision.cached->manifest.builtWith,
+                                         decision.key.builtWith);
+
+    return "library cache hit for " + describeTarget(decision.kind, decision.target)
+           + " (" + details + ")";
+}
+
+std::string describeMiss(const LibraryDecision& decision)
+{
+    auto line = "library cache miss for "
+                + describeTarget(decision.kind, decision.target) + " ("
+                + decision.key.key + "); " + describeWhoStores(decision.kind);
+
+    for (const auto& refusal: decision.refusals)
+        line += "; a stored build is not taken: " + refusal;
+
+    return line;
 }
 
 // "<n> hits, <n> misses, <n> skipped" when only static libraries were
@@ -411,30 +503,38 @@ std::string joinWithAnd(const eacp::Vector<std::string>& items)
 }
 } // namespace
 
-std::optional<StoredEntry> findEntryOfKind(const LibraryStore& store,
-                                           const std::string& key,
-                                           CachedTargetKind kind)
+bool LibraryDecision::isBuiltByAnotherToolchain() const
 {
-    auto entry = store.findEntry(key);
-
-    if (!entry || entry->manifest.kind != kind)
-        return std::nullopt;
-
-    auto isOneFile = entry->manifest.files.size() == 1;
-
-    if (kind != CachedTargetKind::objectLibrary && !isOneFile)
-        return std::nullopt;
-
-    return entry;
+    return cached && cached->address.buildId != key.buildId;
 }
 
-LibraryCachePlan planLibraryCache(const LibraryCacheInputs& inputs,
-                                  const LibraryStore& store)
+BuildChoice chooseStoredBuild(const LibraryStore& store,
+                              const LibraryKey& key,
+                              CachedTargetKind kind,
+                              const ToolchainRanges& ranges)
+{
+    auto own = store.findEntry({key.key, key.buildId});
+
+    if (own && holdsKind(*own, kind))
+        return {own, {}};
+
+    auto choice = BuildChoice {};
+
+    for (const auto& stored: store.listBuilds(key.key))
+    {
+        if (holdsKind(stored, kind) && stored.address.buildId != key.buildId)
+            considerBuild(choice, stored, key.builtWith, ranges);
+    }
+
+    return choice;
+}
+
+LibraryCachePlan planLibraryCache(const LibraryCachePlanning& planning)
 {
     auto plan = LibraryCachePlan {};
     auto libraryKeys = LinkedLibraryKeys {};
-    planLibraries(plan, libraryKeys, inputs, store);
-    planExecutables(plan, libraryKeys, inputs, store);
+    planLibraries(plan, libraryKeys, planning);
+    planExecutables(plan, libraryKeys, planning);
     return plan;
 }
 
@@ -447,6 +547,13 @@ eacp::FilePath getInputsPath(const eacp::FilePath& buildDirectory,
                              const std::string& key)
 {
     return getLibraryCacheDirectory(buildDirectory) / "inputs" / (key + ".txt");
+}
+
+eacp::FilePath getBuiltWithPath(const eacp::FilePath& buildDirectory,
+                                const std::string& key)
+{
+    return getLibraryCacheDirectory(buildDirectory) / "inputs"
+           / (key + ".built-with.json");
 }
 
 std::string getLockstepExecutable()
@@ -520,23 +627,9 @@ std::string createReport(const LibraryCachePlan& plan)
     for (const auto& decision: plan.decisions)
     {
         if (decision.cached)
-        {
-            auto source =
-                decision.isFetched ? std::string {", fetched"} : std::string {};
-            report +=
-                createMessage("VERBOSE",
-                              "library cache hit for "
-                                  + describeTarget(decision.kind, decision.target)
-                                  + " (" + decision.key.key + source + ")");
-        }
+            report += createMessage("VERBOSE", describeHit(decision));
         else
-        {
-            report += createMessage(
-                "VERBOSE",
-                "library cache miss for "
-                    + describeTarget(decision.kind, decision.target) + " ("
-                    + decision.key.key + "); " + describeWhoStores(decision.kind));
-        }
+            report += createMessage("VERBOSE", describeMiss(decision));
     }
 
     for (const auto& skipped: plan.skipped)
@@ -584,6 +677,9 @@ LibraryCacheStatistics countHitsAndMisses(const LibraryCachePlan& plan)
 
         if (decision.isFetched)
             ++counts.fetchedHits;
+
+        if (decision.isBuiltByAnotherToolchain())
+            ++counts.otherToolchainHits;
     }
 
     return statistics;
@@ -598,7 +694,12 @@ void writeLibraryCacheFiles(const CommandOptions& options,
                            stubDeclaration);
 
     for (const auto& decision: plan.decisions)
+    {
         writeFileIfChanged(getInputsPath(options.buildDirectory, decision.key.key),
                            decision.key.inputs);
+        writeFileIfChanged(
+            getBuiltWithPath(options.buildDirectory, decision.key.key),
+            Miro::toJSONString(decision.key.builtWith));
+    }
 }
 } // namespace lockstep

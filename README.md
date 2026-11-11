@@ -144,6 +144,8 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp GIT_TAG main
 | `LOCKSTEP_LOCK_FILE` | Default `<top-level source dir>/lockstep.lock` |
 | `LOCKSTEP_EXECUTABLE` | Run this `lockstep` binary instead of downloading the pinned release. The environment variable wins over the cached value |
 | `LOCKSTEP_LIBRARY_CACHE` | `ON` takes a package's static libraries, the executables it builds and its object libraries' object files from `<cache>/lib` when an earlier build built them from the same inputs, instead of building them again. Also an environment variable, which turns the cache on for every project; `-DLOCKSTEP_LIBRARY_CACHE=ON` or `OFF` on a build directory wins over it. Default `OFF`; see [The library cache](#the-library-cache) |
+| `LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE` | Also take stored builds made by a compiler whose version is in this range, such as `>=21.0.0`. Also an environment variable; a `-D` on a build directory wins over it, and an empty one turns the range off there. Unset, only this machine's own compiler's builds are taken; see [Builds by another compiler or SDK](#builds-by-another-compiler-or-sdk) |
+| `LOCKSTEP_LIBRARY_CACHE_SDK_RANGE` | The same for the Apple SDK that built a stored entry, such as `>=26.5` |
 | `LOCKSTEP_LIBRARY_CACHE_LOCATION` | Where the library cache is, so several machines share it: a directory, or `[user@]host:directory` on a Unix host reached over ssh. Also an environment variable; `-DLOCKSTEP_LIBRARY_CACHE_LOCATION=...` on a build directory wins over it, and an empty value turns it off there. Unset, the library cache is `<cache>/lib` alone; see [One library cache for several machines](#one-library-cache-for-several-machines) |
 
 ### The library cache
@@ -173,12 +175,13 @@ At the end of the configure, lockstep computes a key for each static library a
 locked package declares: a SHA-256 over the package's content hash, the
 target's sources and compile settings, the usage requirements of everything it
 links, its directory's compile options and `CMAKE_<LANG>_FLAGS`, the compiler's
-ID, version and target, the build type, the platform and SDK settings (on
-Apple systems also the version and build of the SDK the compiler uses, as
-`xcrun --show-sdk-version` and `--show-sdk-build-version` print them, since
-with CMake 4 `CMAKE_OSX_SYSROOT` is usually empty), and the
+ID, path and target, the build type, the platform and SDK settings, and the
 values of the upper-case variables the package's CMake files name (its
-options). Compiler and flag settings are read in the directory that declares
+options). What built the library stays out of the key and is recorded beside
+the stored library instead (see
+[Builds by another compiler or SDK](#builds-by-another-compiler-or-sdk)): the
+version of each compiler and a SHA-256 of its executable, the Apple SDK's
+version and build, the CMake version and the system version. Compiler and flag settings are read in the directory that declares
 the library, as the compiler gets them: a package whose own `project()` enables
 C has its C compiler in the key even when the top-level project enables only
 C++. The build directory and the cache directory are replaced by fixed
@@ -310,6 +313,99 @@ such as the `<Name>_Register.cpp` ResEmbed adds to every target that links a
 library with resources, compiles in every build: it is the project target's
 compile, which the cache does not store.
 
+### Builds by another compiler or SDK
+
+Two Macs on different Xcode releases never share a library: their compiler and
+SDK versions differ, so each builds its own. When a nearby compiler's output is
+good enough for you, a range says so, and the library cache takes builds made
+by the compilers and SDKs in it:
+
+```bash
+export LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE=">=21.0.0"
+export LOCKSTEP_LIBRARY_CACHE_SDK_RANGE=">=26.5"
+```
+
+Beside each stored library, executable and object library lockstep records
+what built it: for each language the target compiles, the compiler's version
+(`CMAKE_<LANG>_COMPILER_VERSION`) and a SHA-256 of the compiler's executable;
+for an executable, the linker's version (`CMAKE_<LANG>_COMPILER_LINKER_VERSION`);
+on Apple systems the version and build of the SDK the compiler uses, as `xcrun
+--show-sdk-version` and `--show-sdk-build-version` print them (with CMake 4
+`CMAKE_OSX_SYSROOT` is usually empty); the CMake version; and, unless
+cross-compiling, `CMAKE_SYSTEM_VERSION`, the version of the system that built
+it. When cross-compiling, `CMAKE_SYSTEM_VERSION` is the target's, such as an
+Android API level, and stays in the key. Everything else is in the key,
+including the compiler's ID, so an AppleClang, Clang, GCC or MSVC build is
+never taken by another compiler. One key holds several builds side by side,
+one per record, in `<cache>/lib/format-<n>/<key>/<build id>/`, where the build
+id is the SHA-256 of the record.
+
+With neither range set, a lookup takes only a build whose record is this
+machine's own, so the same builds hit and miss as before the record existed. A
+range admits builds by others:
+
+- `LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE`: the version of the compiler that
+  built the entry must be in the range, for every language. The compiler
+  executable's hash and the linker's version are not compared.
+- `LOCKSTEP_LIBRARY_CACHE_SDK_RANGE`: the version of the SDK that built the
+  entry must be in the range. The SDK's build is not compared.
+
+Without the compiler range the compiler must be this machine's own: the same
+version, executable and linker. Without the SDK range the SDK must be the same
+version and build. Someone who accepts another compiler's or SDK's output has
+accepted another machine's build, so with either range set the CMake version
+and system version that built an entry are not compared.
+
+A range is one or more parts separated by spaces, all of which must hold:
+`>=21.0.0`, `<=21.0.4`, `>=21.0.0 <=21.0.4` or `=21.0.0.21000101`. A part
+compares as many numbers of a version as it has itself: `=21.0.0` holds
+21.0.0, 21.0.0.21000101 and 21.0.0.21000401 but not 21.0.1, and `<=21.0.4`
+holds 21.0.4.9. Anything else stops the configure with a message naming the
+setting. A range is not a filter on this machine's own builds: those are
+always taken. Of the other builds a range admits, lookup takes the one made
+by the newest compiler, then the newest SDK.
+
+A library or object library compiled with link-time optimisation (`-flto` in
+any form, `INTERPROCEDURAL_OPTIMIZATION`, or MSVC's `/GL`) holds the compiler's
+intermediate code, which the linker compiles, and its record says so. Whatever
+the range says, a build of one by a Clang newer than this machine's is never
+taken, since this machine's linker cannot read newer bitcode, and a build by
+GCC or MSVC is taken only from the same compiler version, since those read
+only their own version's intermediate code. An executable holds machine code
+only, so this does not apply to it; an executable is taken only when it linked
+the same builds of its libraries as this build directory links.
+
+A hit on another toolchain's build is never silent. The configure line counts
+them, `15 hits (3 built by another toolchain), 18 misses, 0 skipped`;
+`--log-level=VERBOSE` names what built each, as in `library cache hit for
+eacp-core (<key>; built with CXX compiler 21.0.0.21000101, SDK 26.5 (25F70))`,
+and names for each miss the stored builds it did not take and why; and
+`lockstep cache stats` counts them under `another toolchain`.
+
+The compiler's SHA-256 closes a hole: the key used to hold only a compiler's
+name and version, so a patched compiler that reports the same version shared
+libraries with the unpatched one. lockstep hashes the files the compiler really
+runs, not the launcher CMake names:
+
+- Clang and AppleClang: the binary in the directory `<compiler> --version`
+  prints as `InstalledDir`. On macOS that is the toolchain's `clang`, not the
+  `/usr/bin` shim that runs `xcrun`, so two Macs with the same Xcode share: its
+  bytes are the same, and the time it was installed is not part of the hash.
+  Under nix it is the `clang` the wrapper runs.
+- GCC: the compiler proper, `cc1plus` for C++ (`cc1` for C), as
+  `<compiler> -print-prog-name=cc1plus` prints it.
+- MSVC: `cl.exe` and the `c1.dll`, `c1xx.dll` and `c2.dll` beside it.
+- Any other compiler, or one that does not answer: the file CMake names.
+
+A compiler CMake names that is a script, such as nix's wrapper, which adds
+flags of its own, is hashed too. Each file's SHA-256 is remembered in
+`<cache>/lib/compiler-executables.json` by its path, size and modification
+time, so a configure rehashes only a compiler that changed. When no file can be
+read, the hash is empty, which matches only another empty one, as the version
+alone did before. A compiler that keeps its code in shared libraries, such as
+a Linux distribution's Clang, is covered through its executable only; under
+nix the executable names its libraries' store paths, which covers them too.
+
 On Windows with whole-program optimisation (`/GL`), the stored `.lib` files
 hold MSVC's intermediate code rather than machine code, so they are large:
 eacp's 8 libraries took 190 MiB, against 5.5 MiB on macOS.
@@ -372,10 +468,13 @@ A location that is a directory works the same way, through the same copies in
 `<cache>/lib`: a build links only files on this disk, and a share that goes
 away during a build cannot break the link.
 
-Two machines share a library only when its key is the same on both. The key
-covers the compiler's ID and version, the build type and the platform, and on
-Apple systems the SDK's version and build, so a Mac on another Xcode or SDK
-misses, builds the library and sends its own copy beside the first. The key
+Two machines share a library only when its key is the same on both and the
+build at the location is one they take (see
+[Builds by another compiler or SDK](#builds-by-another-compiler-or-sdk)). With
+no range set, a Mac on another Xcode or SDK misses, builds the library and
+sends its own build beside the first. With a range set, a configure asks the
+location in the same round trip for every build of a key whose own build it
+lacks, checks each, and takes one its ranges admit. The key
 also covers the path of the cache directory, because the compiler writes the
 absolute paths of the package sources into the object code, in `__FILE__`
 (asserts and log lines) and in the debug information. Machines share only when

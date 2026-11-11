@@ -29,9 +29,12 @@ lockstep_add_package(NAME emberstore GITHUB tamber-inc/emberstore
         GIT_TAG 2cda8a019ff2df7ee135f1b5a89847378bbcaf55 EXCLUDE_FROM_ALL)
 
 add_library(lockstep-lib STATIC
+        src/BuiltWith.cpp
+        src/BuiltWithFields.cpp
         src/CMakeSnippet.cpp
         src/Commands.cpp
         src/CompileFlags.cpp
+        src/CompilerExecutable.cpp
         src/ConfigureDescription.cpp
         src/ExecutableCache.cpp
         src/KeyText.cpp
@@ -42,6 +45,7 @@ add_library(lockstep-lib STATIC
         src/LibraryCacheCommands.cpp
         src/LibraryCacheLocation.cpp
         src/LibraryCachePlan.cpp
+        src/LibraryCacheSettings.cpp
         src/LibraryStore.cpp
         src/LockFile.cpp
         src/LongPath.cpp
@@ -52,7 +56,8 @@ add_library(lockstep-lib STATIC
         src/Session.cpp
         src/Status.cpp
         src/Submodules.cpp
-        src/Sha256.cpp)
+        src/Sha256.cpp
+        src/VersionRange.cpp)
 
 target_include_directories(lockstep-lib PUBLIC src)
 target_link_libraries(lockstep-lib PUBLIC eacp-core eacp-network)

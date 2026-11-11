@@ -3,6 +3,7 @@
 #include "StatisticsWriter.h"
 #include "TestDirectory.h"
 
+#include <BuiltWithFields.h>
 #include <LibraryCache.h>
 #include <LibraryCacheLocation.h>
 #include <LibraryCachePlan.h>
@@ -31,6 +32,14 @@ constexpr auto packageDirectory = "/cache/src/1111";
 constexpr auto projectDirectory = "/project";
 constexpr auto testExecutablePath = LOCKSTEP_TESTS_EXECUTABLE;
 const auto sampleKey = std::string(lockstep::libraryKeyLength, 'a');
+
+// The id of a build stored with an empty record, as the tests' entries are.
+const auto plainBuildId = lockstep::computeBuildId({});
+
+lockstep::EntryAddress addressOf(const std::string& key)
+{
+    return {key, plainBuildId};
+}
 constexpr auto fakeArchiverPatience = std::chrono::seconds {60};
 constexpr auto filePollInterval = std::chrono::milliseconds {20};
 
@@ -77,6 +86,9 @@ struct SampleBuild
     std::string apple;
     std::string appleSdkVersion = "26.5";
     std::string appleSdkBuildVersion = "25F70";
+    std::string cmakeVersion = "4.4.0";
+    std::string systemVersion = "25.5.0";
+    std::string crossCompiling = "FALSE";
 };
 
 std::string createDirectoryRecords(const SampleBuild& build)
@@ -101,7 +113,16 @@ std::string createDirectoryRecords(const SampleBuild& build)
            + build.appleSdkVersion
            + "\n"
              "directory\t/cache/src/1111\tAPPLE_SDK_BUILD_VERSION\t"
-           + build.appleSdkBuildVersion + "\n";
+           + build.appleSdkBuildVersion
+           + "\n"
+             "directory\t/cache/src/1111\tCMAKE_VERSION\t"
+           + build.cmakeVersion
+           + "\n"
+             "directory\t/cache/src/1111\tCMAKE_SYSTEM_VERSION\t"
+           + build.systemVersion
+           + "\n"
+             "directory\t/cache/src/1111\tCMAKE_CROSSCOMPILING\t"
+           + build.crossCompiling + "\n";
 }
 
 std::string createTargetRecords(const SampleBuild& build)
@@ -177,7 +198,7 @@ std::string createRecordsInCacheDirectory(const SampleBuild& build)
     return records;
 }
 
-std::string computeKey(const SampleBuild& build)
+lockstep::LibraryKey computeSampleKey(const SampleBuild& build)
 {
     auto description =
         lockstep::parseConfigureDescription(createRecordsInCacheDirectory(build));
@@ -188,7 +209,14 @@ std::string computeKey(const SampleBuild& build)
         {packageHash, {"GREETER_LOUD", "ARGN", "ARGV", "ARGC", "ARGV0"}}};
     auto inputs = lockstep::LibraryCacheInputs {
         description, packages, names, {build.buildDirectory, build.cacheDirectory}};
-    return lockstep::computeLibraryKey(inputs, "greeter").key;
+    return lockstep::computeLibraryKey(inputs, "greeter");
+}
+
+// <key>/<build id>: where this build's entry is looked up.
+std::string computeAddress(const SampleBuild& build)
+{
+    auto key = computeSampleKey(build);
+    return lockstep::EntryAddress {key.key, key.buildId}.getPath();
 }
 
 bool storeLibrary(const lockstep::LibraryStore& store,
@@ -203,7 +231,7 @@ bool storeLibrary(const lockstep::LibraryStore& store,
 std::optional<eacp::FilePath> findLibrary(const lockstep::LibraryStore& store,
                                           const std::string& key)
 {
-    auto entry = store.findEntry(key);
+    auto entry = store.findEntry(addressOf(key));
 
     if (!entry)
         return std::nullopt;
@@ -264,7 +292,7 @@ auto tSameKeyAcrossBuilds = test("LibraryCache/keyIgnoresBuildDirectory") = []
 {
     auto second = SampleBuild {};
     second.buildDirectory = "/second-build";
-    check(computeKey(SampleBuild {}) == computeKey(second));
+    check(computeAddress(SampleBuild {}) == computeAddress(second));
 };
 
 auto tIgnoresDirectoryIds = test("LibraryCache/keyIgnoresDirectoryIds") = []
@@ -273,7 +301,7 @@ auto tIgnoresDirectoryIds = test("LibraryCache/keyIgnoresDirectoryIds") = []
     first.linkLibraries = "::@(0x55d0c0ffee);fmt;::@";
     auto second = first;
     second.linkLibraries = "::@(0x7f00deadbeef);fmt;::@";
-    check(computeKey(first) == computeKey(second));
+    check(computeAddress(first) == computeAddress(second));
 };
 
 auto tIgnoresTryCompileNames =
@@ -283,14 +311,14 @@ auto tIgnoresTryCompileNames =
     first.loudValue = "ninja -v cmTC_bdb97\nCMakeFiles/cmTC_bdb97.dir/main.c.o";
     auto second = first;
     second.loudValue = "ninja -v cmTC_84289\nCMakeFiles/cmTC_84289.dir/main.c.o";
-    check(computeKey(first) == computeKey(second));
+    check(computeAddress(first) == computeAddress(second));
 };
 
 auto tDefinitionMisses = test("LibraryCache/keyChangesWithCompileDefinition") = []
 {
     auto changed = SampleBuild {};
     changed.definitions = "GREETING=2";
-    check(computeKey(SampleBuild {}) != computeKey(changed));
+    check(computeAddress(SampleBuild {}) != computeAddress(changed));
 };
 
 auto tVariableMisses =
@@ -298,7 +326,7 @@ auto tVariableMisses =
 {
     auto changed = SampleBuild {};
     changed.loudValue = "ON";
-    check(computeKey(SampleBuild {}) != computeKey(changed));
+    check(computeAddress(SampleBuild {}) != computeAddress(changed));
 };
 
 auto tIgnoresCallText = test("LibraryCache/keyIgnoresTextOfAddPackageCall") = []
@@ -309,7 +337,7 @@ auto tIgnoresCallText = test("LibraryCache/keyIgnoresTextOfAddPackageCall") = []
         "OPTIONS;GREETER_LOUD OFF;SYSTEM;YES";
     otherCall.callArgumentCount = "8";
     otherCall.firstCallArgument = "GIT_TAG";
-    check(computeKey(SampleBuild {}) == computeKey(otherCall));
+    check(computeAddress(SampleBuild {}) == computeAddress(otherCall));
 };
 
 auto tOptionInCallMisses =
@@ -318,7 +346,7 @@ auto tOptionInCallMisses =
     auto loud = SampleBuild {};
     loud.callArguments = "NAME;greeter;GIT_TAG;develop;OPTIONS;GREETER_LOUD ON";
     loud.loudValue = "ON";
-    check(computeKey(SampleBuild {}) != computeKey(loud));
+    check(computeAddress(SampleBuild {}) != computeAddress(loud));
 };
 
 auto tIgnoresGenerator =
@@ -326,7 +354,7 @@ auto tIgnoresGenerator =
 {
     auto ninja = SampleBuild {};
     ninja.generator = "Ninja";
-    check(computeKey(SampleBuild {}) == computeKey(ninja));
+    check(computeAddress(SampleBuild {}) == computeAddress(ninja));
 };
 
 auto tScanningGeneratorMisses =
@@ -336,14 +364,14 @@ auto tScanningGeneratorMisses =
     scanned.scanForModules = "";
     auto scannedNinja = scanned;
     scannedNinja.generator = "Ninja";
-    check(computeKey(scanned) != computeKey(scannedNinja));
+    check(computeAddress(scanned) != computeAddress(scannedNinja));
 };
 
 auto tIgnoresSystem = test("LibraryCache/keyIgnoresSystemProperty") = []
 {
     auto system = SampleBuild {};
     system.system = "ON";
-    check(computeKey(SampleBuild {}) == computeKey(system));
+    check(computeAddress(SampleBuild {}) == computeAddress(system));
 };
 
 auto tIgnoresStandardRequired =
@@ -351,7 +379,7 @@ auto tIgnoresStandardRequired =
 {
     auto notRequired = SampleBuild {};
     notRequired.cxxStandardRequired = "OFF";
-    check(computeKey(SampleBuild {}) == computeKey(notRequired));
+    check(computeAddress(SampleBuild {}) == computeAddress(notRequired));
 };
 
 auto tIgnoresOtherLanguage =
@@ -360,7 +388,7 @@ auto tIgnoresOtherLanguage =
     auto otherC = SampleBuild {};
     otherC.cCompilerVersion = "14.1.0";
     otherC.cFlags = "-O3 -DOTHER";
-    check(computeKey(SampleBuild {}) == computeKey(otherC));
+    check(computeAddress(SampleBuild {}) == computeAddress(otherC));
 };
 
 auto tCompiledLanguageMisses =
@@ -372,8 +400,8 @@ auto tCompiledLanguageMisses =
     otherC.cCompilerVersion = "14.1.0";
     auto otherFlags = withC;
     otherFlags.cFlags = "-O3";
-    check(computeKey(withC) != computeKey(otherC));
-    check(computeKey(withC) != computeKey(otherFlags));
+    check(computeAddress(withC) != computeAddress(otherC));
+    check(computeAddress(withC) != computeAddress(otherFlags));
 };
 
 auto tReadsTargetDirectory =
@@ -385,8 +413,8 @@ auto tReadsTargetDirectory =
     otherTopLevel.topLevelCCompilerVersion = "14.1.0";
     auto otherPackage = withC;
     otherPackage.cCompilerVersion = "14.1.0";
-    check(computeKey(withC) == computeKey(otherTopLevel));
-    check(computeKey(withC) != computeKey(otherPackage));
+    check(computeAddress(withC) == computeAddress(otherTopLevel));
+    check(computeAddress(withC) != computeAddress(otherPackage));
 };
 
 auto tAppleSdk = test("LibraryCache/keyChangesWithAppleSdkOnAppleOnly") = []
@@ -400,16 +428,54 @@ auto tAppleSdk = test("LibraryCache/keyChangesWithAppleSdkOnAppleOnly") = []
     auto notApple = SampleBuild {};
     notApple.appleSdkBuildVersion = "25G5";
 
-    check(computeKey(apple) != computeKey(otherSdkVersion));
-    check(computeKey(apple) != computeKey(otherSdkBuild));
-    check(computeKey(SampleBuild {}) == computeKey(notApple));
+    check(computeAddress(apple) != computeAddress(otherSdkVersion));
+    check(computeAddress(apple) != computeAddress(otherSdkBuild));
+    check(computeAddress(SampleBuild {}) == computeAddress(notApple));
+};
+
+auto tVersionsInRecord = test(
+    "LibraryCache/compilerSdkCMakeAndSystemVersionsAreInTheRecordNotTheKey") = []
+{
+    auto apple = SampleBuild {};
+    apple.apple = "1";
+    apple.compiledLanguages = "C;CXX";
+    auto otherVersions = apple;
+    otherVersions.cCompilerVersion = "14.1.0";
+    otherVersions.appleSdkVersion = "26.6";
+    otherVersions.appleSdkBuildVersion = "25G5";
+    otherVersions.cmakeVersion = "4.4.5";
+    otherVersions.systemVersion = "27.0.0";
+    auto first = computeSampleKey(apple);
+    auto second = computeSampleKey(otherVersions);
+
+    check(first.key == second.key);
+    check(first.buildId != second.buildId);
+    check(second.builtWith.sdkVersion == "26.6"
+          && second.builtWith.sdkBuildVersion == "25G5");
+    check(second.builtWith.cmakeVersion == "4.4.5");
+    check(second.builtWith.hostSystemVersion == "27.0.0");
+    check(second.builtWith.compilers.size() == 2
+          && second.builtWith.compilers.front().language == "C"
+          && second.builtWith.compilers.front().version == "14.1.0");
+    check(first.inputs.find("COMPILER_VERSION") == std::string::npos);
+};
+
+auto tCrossCompiledSystemVersion =
+    test("LibraryCache/crossCompilingKeepsTheSystemVersionInTheKey") = []
+{
+    auto cross = SampleBuild {};
+    cross.crossCompiling = "TRUE";
+    auto otherSystem = cross;
+    otherSystem.systemVersion = "34";
+    check(computeSampleKey(cross).key != computeSampleKey(otherSystem).key);
+    check(computeSampleKey(cross).builtWith.hostSystemVersion.empty());
 };
 
 auto tCacheDirectory = test("LibraryCache/keyChangesWithCacheDirectory") = []
 {
     auto otherCache = SampleBuild {};
     otherCache.cacheDirectory = "/other-cache";
-    check(computeKey(SampleBuild {}) != computeKey(otherCache));
+    check(computeAddress(SampleBuild {}) != computeAddress(otherCache));
 };
 
 auto tMappedCacheDirectory =
@@ -436,8 +502,8 @@ auto tMappedCacheDirectory =
             return build;
         };
 
-        return computeKey(withCache("/cache"))
-               == computeKey(withCache("/other-cache"));
+        return computeAddress(withCache("/cache"))
+               == computeAddress(withCache("/other-cache"));
     };
 
     check(keysMatchAcrossCaches("-O2 -ffile-prefix-map={cache}=."));
@@ -453,7 +519,7 @@ auto tMappedCacheDirectory =
     cxxBuild.cFlags = "-ffile-prefix-map=/=/root";
     auto cxxBuildInOtherCache = cxxBuild;
     cxxBuildInOtherCache.cacheDirectory = "/other-cache";
-    check(computeKey(cxxBuild) != computeKey(cxxBuildInOtherCache));
+    check(computeAddress(cxxBuild) != computeAddress(cxxBuildInOtherCache));
 };
 
 auto tClosure = test("LibraryCache/closureFollowsInterfaceLinks") = []
@@ -623,7 +689,7 @@ auto tStoreObjects = test("LibraryStore/storesObjectFilesInTheirOrder") = []
         sampleKey,
         {lockstep::CachedTargetKind::objectLibrary, {first, second}, "inputs"}));
 
-    auto entry = store.findEntry(sampleKey);
+    auto entry = store.findEntry(addressOf(sampleKey));
     check(entry.has_value());
     auto files = entry->getFilePaths();
     check(files.size() == 2);
@@ -641,12 +707,15 @@ auto tEntryKind = test("LibraryCachePlan/findsEntryOfTheKindAskedFor") = []
     auto store = lockstep::LibraryStore {directory / "cache"};
     store.storeEntry(sampleKey,
                      {lockstep::CachedTargetKind::executable, {tool}, "inputs"});
+    auto key = lockstep::createLibraryKey("inputs", {});
+    key.key = sampleKey;
 
-    check(lockstep::findEntryOfKind(
-              store, sampleKey, lockstep::CachedTargetKind::executable)
-              .has_value());
-    check(!lockstep::findEntryOfKind(
-        store, sampleKey, lockstep::CachedTargetKind::staticLibrary));
+    check(lockstep::chooseStoredBuild(
+              store, key, lockstep::CachedTargetKind::executable, {})
+              .entry.has_value());
+    check(!lockstep::chooseStoredBuild(
+               store, key, lockstep::CachedTargetKind::staticLibrary, {})
+               .entry);
 };
 
 auto tStoreCounts = test("LibraryStore/addsStatisticsAcrossConfiguresAndLinks") = []
@@ -699,7 +768,7 @@ auto tCorruptFiles = test("LibraryStore/readsCorruptOrHalfWrittenFilesAsEmpty") 
     store.addToStatistics(countStaticLibraries({.hits = 5}));
     auto storeDirectory = getCurrentFormatStore(directory / "cache");
 
-    writeTestFile(storeDirectory / sampleKey / "manifest.json",
+    writeTestFile(storeDirectory / sampleKey / plainBuildId / "manifest.json",
                   "{\"fileName\": \"libgree");
     writeTestFile(storeDirectory / "statistics.json", "not json at all");
 
@@ -815,13 +884,15 @@ auto tFetchesFromDirectory =
     auto local = lockstep::LibraryStore {directory / "cache"};
     storeLibrary(local, copiedOnly.key, library, copiedOnly.inputs);
 
-    auto fetched =
-        createCacheAtDirectory(directory / "location")
-            .fetchLibraries({{shared.key, missingEverywhere.key}, {copiedOnly.key}},
-                            local);
+    auto fetched = createCacheAtDirectory(directory / "location")
+                       .fetchLibraries({{addressOf(shared.key),
+                                         addressOf(missingEverywhere.key)},
+                                        false,
+                                        {addressOf(copiedOnly.key)}},
+                                       local);
 
-    check(fetched.fetchedKeys == std::set<std::string> {shared.key});
-    check(fetched.keysLocationLacks == std::vector<std::string> {copiedOnly.key});
+    check(fetched.fetched == std::set {addressOf(shared.key)});
+    check(fetched.locationLacks == std::vector {addressOf(copiedOnly.key)});
     check(fetched.discarded.empty());
     auto copy = findLibrary(local, shared.key);
     check(copy && eacp::Files::readFile(*copy) == "archive");
@@ -840,9 +911,9 @@ auto tDiscardsChanged =
     auto local = lockstep::LibraryStore {directory / "cache"};
 
     auto fetched = createCacheAtDirectory(directory / "location")
-                       .fetchLibraries({{entry.key}, {}}, local);
+                       .fetchLibraries({{addressOf(entry.key)}, false, {}}, local);
 
-    check(fetched.fetchedKeys.empty());
+    check(fetched.fetched.empty());
     check(fetched.discarded.size() == 1
           && fetched.discarded.front().reason.find("SHA-256") != std::string::npos);
     check(!findLibrary(local, entry.key));
@@ -866,16 +937,19 @@ auto tFetchesObjects =
                              {first, second},
                              entry.inputs});
 
-    writeTestFile(location.findEntry(changed.key)->getFilePaths().back(), "changed");
+    writeTestFile(location.findEntry(addressOf(changed.key))->getFilePaths().back(),
+                  "changed");
     auto local = lockstep::LibraryStore {directory / "cache"};
 
-    auto fetched = createCacheAtDirectory(directory / "location")
-                       .fetchLibraries({{kept.key, changed.key}, {}}, local);
+    auto fetched =
+        createCacheAtDirectory(directory / "location")
+            .fetchLibraries(
+                {{addressOf(kept.key), addressOf(changed.key)}, false, {}}, local);
 
-    check(fetched.fetchedKeys == std::set<std::string> {kept.key});
+    check(fetched.fetched == std::set {addressOf(kept.key)});
     check(fetched.discarded.size() == 1
-          && fetched.discarded.front().key == changed.key);
-    auto copy = local.findEntry(kept.key);
+          && fetched.discarded.front().address == addressOf(changed.key));
+    auto copy = local.findEntry(addressOf(kept.key));
     check(copy && copy->manifest.kind == lockstep::CachedTargetKind::objectLibrary);
     check(copy
           && eacp::Files::readFile(copy->getFilePaths().back()) == "second object");
@@ -891,10 +965,11 @@ auto tSendsToDirectory = test("LibraryCacheLocation/sendsToDirectory") = []
     storeLibrary(local, entry.key, library, entry.inputs);
     auto cache = createCacheAtDirectory(directory / "location");
 
-    cache.sendLibraries({entry.key}, local);
-    cache.sendLibraries({entry.key}, local);
+    cache.sendLibraries({addressOf(entry.key)}, local);
+    cache.sendLibraries({addressOf(entry.key)}, local);
 
-    auto sent = openStoreAtDirectory(directory / "location").findEntry(entry.key);
+    auto sent =
+        openStoreAtDirectory(directory / "location").findEntry(addressOf(entry.key));
     check(sent && sent->manifest.inputs == entry.inputs);
     check(sent
           && sent->manifest.files.front().sha256
@@ -952,7 +1027,7 @@ auto tClearDuringSend =
         try
         {
             lockstep::LibraryCacheAtLocation {location, fakeCMake}.sendLibraries(
-                {entry.key}, local);
+                {addressOf(entry.key)}, local);
         }
         catch (const std::exception&)
         {
@@ -1034,7 +1109,7 @@ int runLibrarySender(const LibrarySenderArguments& arguments)
 {
     auto local = lockstep::LibraryStore {eacp::FilePath {arguments.cacheDirectory}};
     createCacheAtDirectory(eacp::FilePath {arguments.locationDirectory})
-        .sendLibraries({std::string {arguments.key}}, local);
+        .sendLibraries({addressOf(std::string {arguments.key})}, local);
     return 0;
 }
 

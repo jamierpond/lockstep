@@ -56,13 +56,31 @@ void pauseForRandomMoment()
     std::this_thread::sleep_for(std::chrono::milliseconds {milliseconds(generator)});
 }
 
-bool isNamedLikeLibraryKey(const eacp::FilePath& entry)
+bool isNamedLikeKey(std::string_view name)
 {
-    auto name = entry.fileName();
     auto isHexDigit = [](char character)
     { return std::isxdigit(static_cast<unsigned char>(character)) != 0; };
 
     return name.size() == libraryKeyLength && std::ranges::all_of(name, isHexDigit);
+}
+
+bool isNamedLikeLibraryKey(const eacp::FilePath& entry)
+{
+    return isNamedLikeKey(entry.fileName());
+}
+
+eacp::Vector<eacp::FilePath> listKeyNamedDirectories(const eacp::FilePath& directory)
+{
+    auto directories = eacp::Vector<eacp::FilePath> {};
+
+    for (const auto& entry: eacp::Files::listDirectory(directory, {}))
+    {
+        if (entry.kind == eacp::Files::EntryKind::directory
+            && isNamedLikeLibraryKey(entry.path))
+            directories.add(entry.path);
+    }
+
+    return directories;
 }
 
 // Written into the staging directory with emberstore's atomic write rather
@@ -100,6 +118,7 @@ std::optional<std::string> deleteEntry(const eacp::FilePath& entry)
     return std::nullopt;
 }
 
+// Each key's directory, with every build of it inside.
 eacp::Vector<eacp::FilePath>
     listEveryFormatEntry(const eacp::FilePath& everyFormatRoot)
 {
@@ -107,14 +126,8 @@ eacp::Vector<eacp::FilePath>
 
     for (const auto& format: eacp::Files::listDirectory(everyFormatRoot, {}))
     {
-        if (format.kind != eacp::Files::EntryKind::directory)
-            continue;
-
-        for (const auto& entry: eacp::Files::listDirectory(format.path, {}))
-        {
-            if (isNamedLikeLibraryKey(entry.path))
-                entries.add(entry.path);
-        }
+        if (format.kind == eacp::Files::EntryKind::directory)
+            entries.addFrom(listKeyNamedDirectories(format.path));
     }
 
     return entries;
@@ -172,6 +185,22 @@ emberstore::Document<LibraryCacheStatistics>
 }
 } // namespace
 
+std::optional<EntryAddress> parseEntryAddress(std::string_view text)
+{
+    auto slash = text.find('/');
+
+    if (slash == std::string_view::npos)
+        return std::nullopt;
+
+    auto key = text.substr(0, slash);
+    auto buildId = text.substr(slash + 1);
+
+    if (!isNamedLikeKey(key) || !isNamedLikeKey(buildId))
+        return std::nullopt;
+
+    return EntryAddress {std::string {key}, std::string {buildId}};
+}
+
 eacp::FilePath getLibraryManifestPath(const eacp::FilePath& entryDirectory)
 {
     return entryDirectory / (std::string {manifestName} + ".json");
@@ -222,6 +251,7 @@ void addStatistics(LibraryCacheStatistics& total,
         counts.misses += addedCounts.misses;
         counts.stores += addedCounts.stores;
         counts.fetchedHits += addedCounts.fetchedHits;
+        counts.otherToolchainHits += addedCounts.otherToolchainHits;
     }
 }
 
@@ -256,14 +286,14 @@ LibraryStore::LibraryStore(const LibraryStoreDirectory& storeDirectory)
 {
 }
 
-eacp::FilePath LibraryStore::getEntryDirectory(const std::string& key) const
+eacp::FilePath LibraryStore::getEntryDirectory(const EntryAddress& address) const
 {
-    return root / key;
+    return root / address.key / address.buildId;
 }
 
-std::optional<StoredEntry> LibraryStore::findEntry(const std::string& key) const
+std::optional<StoredEntry> LibraryStore::findEntry(const EntryAddress& address) const
 {
-    auto entry = StoredEntry {getEntryDirectory(key), {}};
+    auto entry = StoredEntry {address, getEntryDirectory(address), {}};
     auto manifest = readLibraryManifest(entry.directory);
 
     if (!manifest)
@@ -277,20 +307,34 @@ std::optional<StoredEntry> LibraryStore::findEntry(const std::string& key) const
     return entry;
 }
 
+std::vector<StoredEntry> LibraryStore::listBuilds(const std::string& key) const
+{
+    auto builds = std::vector<StoredEntry> {};
+
+    for (const auto& build: listKeyNamedDirectories(root / key))
+    {
+        if (auto entry = findEntry({key, build.fileName()}))
+            builds.push_back(*entry);
+    }
+
+    return builds;
+}
+
 bool LibraryStore::storeEntry(const std::string& key,
                               const EntryToStore& entry) const
 {
-    auto destination = getEntryDirectory(key);
+    auto address = EntryAddress {key, computeBuildId(entry.builtWith)};
+    auto destination = getEntryDirectory(address);
 
     if (eacp::Files::isDirectory(destination))
         return false;
 
     eacp::Files::createDirectories(root);
 
-    // A random name beside the entry, so two builds storing one key never
+    // A random name beside the entries, so two builds storing one entry never
     // write into the same directory and the rename publishes it whole.
     auto staging = eacp::TemporaryFile {root, ".staging"};
-    auto manifest = LibraryManifest {entry.kind, {}, entry.inputs};
+    auto manifest = LibraryManifest {entry.kind, {}, entry.inputs, entry.builtWith};
 
     for (auto index = std::size_t {0}; index < entry.files.size(); ++index)
     {
@@ -306,6 +350,7 @@ bool LibraryStore::storeEntry(const std::string& key,
     }
 
     writeManifest(staging.path(), manifest);
+    eacp::Files::createDirectories(destination.parentDirectory());
 
     if (renameAtAnyLength(staging.path(), destination))
         return true;
@@ -343,13 +388,10 @@ LibraryStoreSummary LibraryStore::summarize() const
     if (!eacp::Files::isDirectory(root))
         return summary;
 
-    for (const auto& entry: eacp::Files::listDirectory(root, {}))
+    for (const auto& key: listKeyNamedDirectories(root))
     {
-        if (!isNamedLikeLibraryKey(entry.path))
-            continue;
-
-        if (auto stored = findEntry(entry.path.fileName()))
-            ++summary.entryCounts[stored->manifest.kind];
+        for (const auto& stored: listBuilds(key.fileName()))
+            ++summary.entryCounts[stored.manifest.kind];
     }
 
     auto options = eacp::Files::DirectoryOptions {};

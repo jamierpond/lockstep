@@ -13,6 +13,17 @@ set(_LOCKSTEP_COMMAND "${CMAKE_COMMAND}" -E env "LOCKSTEP_EXECUTABLE=${LOCKSTEP_
         "--source-dir=${CMAKE_SOURCE_DIR}" "--build-dir=${CMAKE_BINARY_DIR}"
         "--bootstrap=${LOCKSTEP_BOOTSTRAP}")
 
+# The library cache settings this build directory defines, even as empty, which
+# win over the environment and lockstep.json.
+set(_lockstep_cache_variables)
+foreach (name LOCKSTEP_LIBRARY_CACHE LOCKSTEP_LIBRARY_CACHE_LOCATION
+        LOCKSTEP_LIBRARY_CACHE_COMPILER_RANGE LOCKSTEP_LIBRARY_CACHE_SDK_RANGE
+        LOCKSTEP_LIBRARY_CACHE_MAX_SIZE LOCKSTEP_LIBRARY_CACHE_LOCATION_MAX_SIZE)
+    if (DEFINED CACHE{${name}})
+        list(APPEND _lockstep_cache_variables "--cache-variable=${name}=${${name}}")
+    endif ()
+endforeach ()
+
 get_cmake_property(_lockstep_variables VARIABLES)
 list(FILTER _lockstep_variables INCLUDE REGEX "^(LOCKSTEP|CPM)_.+_SOURCE$")
 set(_lockstep_overrides)

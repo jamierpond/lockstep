@@ -3,6 +3,7 @@
 #include <eacp/Core/Utils/Containers.h>
 #include <eacp/Core/Utils/FilePath.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,11 @@ struct CommandOptions
     std::string object;
     // LOCKSTEP_LIBRARY_CACHE_LOCATION: a directory or [user@]host:directory.
     std::string libraryCacheLocation;
+    // <name>=<value> of every library cache setting defined as a cache variable
+    // on the build directory, even an empty one.
+    eacp::Vector<std::string> cacheVariables;
+    // The library cache settings' environment variables, read at start-up.
+    std::map<std::string, std::string> settingEnvironment;
     std::string topLevelIncludes;
     eacp::Vector<std::string> overrides;
     bool isFullVerify = false;

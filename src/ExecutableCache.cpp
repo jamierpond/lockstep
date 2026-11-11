@@ -1,4 +1,5 @@
 #include "ExecutableCache.h"
+#include "BuiltWithFields.h"
 #include "CompileFlags.h"
 #include "LibraryCache.h"
 #include "PackageArguments.h"
@@ -335,6 +336,7 @@ LibraryKey computeExecutableKey(const LibraryCacheInputs& inputs,
     text.addCacheDirectory();
 
     auto filter = createLinkKeyFieldFilter(inputs.description, target);
+    auto builtWith = moveBuiltWithFieldsOutOfKey(inputs, target, filter);
     addOwnTarget(text, inputs, target, filter);
     text.addFields(
         "directory", findDirectoryFields(inputs.description, target), filter);
@@ -343,10 +345,15 @@ LibraryKey computeExecutableKey(const LibraryCacheInputs& inputs,
     {
         addTarget(text, inputs, linked, filter);
 
-        if (auto key = libraryKeys.find(linked); key != libraryKeys.end())
-            text.addLine("linked-library-key", linked, key->second);
+        if (auto library = libraryKeys.find(linked); library != libraryKeys.end())
+        {
+            text.addLine("linked-library-key", linked, library->second.key);
+            builtWith.linkedBuilds.push_back(library->second.key + "/"
+                                             + library->second.buildId);
+        }
     }
 
-    return {computeSha256Hex(text.getText()), text.getText()};
+    std::ranges::sort(builtWith.linkedBuilds);
+    return createLibraryKey(text.getText(), builtWith);
 }
 } // namespace lockstep

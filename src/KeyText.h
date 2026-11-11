@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BuiltWith.h"
 #include "ConfigureDescription.h"
 
 #include <string>
@@ -14,6 +15,10 @@ struct LibraryKey
 
     // What the key is the SHA-256 of.
     std::string inputs;
+
+    // What this machine's build of it is built with, and that record's id.
+    BuiltWith builtWith;
+    std::string buildId;
 };
 
 // The fields that cannot change a target's output: they stay out of its key,

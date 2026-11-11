@@ -1,5 +1,7 @@
 #include "CMakeSnippet.h"
 #include "Commands.h"
+#include "CompilerExecutable.h"
+#include "LibraryCacheSettings.h"
 #include "LibraryCache.h"
 #include "LibraryCacheLocation.h"
 #include "LibraryCachePlan.h"
@@ -17,6 +19,8 @@
 #include <eacp/Core/Utils/Format.h>
 #include <eacp/Core/Utils/Strings.h>
 #include <eacp/Core/Utils/TemporaryFile.h>
+
+#include <Miro/Json.h>
 
 #include <algorithm>
 #include <array>
@@ -95,9 +99,9 @@ PackageVariableNames collectVariableNamesOfCachedPackages(
 // Sending runs in a process of its own that outlives the link or configure that
 // started it, so neither waits on the network.
 void startSendingLibraries(const CommandOptions& options,
-                           const std::vector<std::string>& keys)
+                           const std::vector<EntryAddress>& addresses)
 {
-    if (keys.empty() || options.libraryCacheLocation.empty())
+    if (addresses.empty() || options.libraryCacheLocation.empty())
         return;
 
     auto executable = getLockstepExecutable();
@@ -106,8 +110,8 @@ void startSendingLibraries(const CommandOptions& options,
     process.arguments = {"send-libraries"};
     process.arguments.addFrom(createSharedArguments(options));
 
-    for (const auto& key: keys)
-        process.arguments.add("--library=" + key);
+    for (const auto& address: addresses)
+        process.arguments.add("--library=" + address.getPath());
 
     process.environment.add({"LOCKSTEP_EXECUTABLE", executable});
     process.workingDirectory = eacp::FilePath::tempDirectory().str();
@@ -123,33 +127,28 @@ std::string describeSeconds(std::chrono::steady_clock::duration duration)
     return eacp::Strings::format("{:.1f} s", seconds);
 }
 
-LibraryFetchRequest createFetchRequest(const LibraryCachePlan& plan)
+LibraryFetchRequest createFetchRequest(const LibraryCachePlan& plan,
+                                       const ToolchainRanges& ranges)
 {
     auto request = LibraryFetchRequest {};
+    request.fetchesOtherBuilds = ranges.isAnySet();
 
     for (const auto& decision: plan.decisions)
     {
         if (decision.cached)
-            request.copiedKeys.push_back(decision.key.key);
+            request.copied.push_back(decision.cached->address);
         else
-            request.missingKeys.push_back(decision.key.key);
+            request.missing.push_back({decision.key.key, decision.key.buildId});
     }
 
     return request;
 }
 
-void markFetchedLibraries(LibraryCachePlan& plan,
-                          const LibraryFetchResult& fetched,
-                          const LibraryStore& store)
+void markFetchedLibraries(LibraryCachePlan& plan, const LibraryFetchResult& fetched)
 {
     for (auto& decision: plan.decisions)
-    {
-        if (!fetched.fetchedKeys.contains(decision.key.key))
-            continue;
-
-        decision.cached = findEntryOfKind(store, decision.key.key, decision.kind);
-        decision.isFetched = decision.cached.has_value();
-    }
+        decision.isFetched =
+            decision.cached && fetched.fetched.contains(decision.cached->address);
 }
 
 std::string
@@ -160,7 +159,7 @@ std::string
     auto descriptions = eacp::Vector<std::string> {};
 
     for (const auto& library: discarded)
-        descriptions.add(library.key + " (" + library.reason + ")");
+        descriptions.add(library.address.getPath() + " (" + library.reason + ")");
 
     return "discarded " + std::to_string(discarded.size()) + " " + entries
            + " fetched from " + location.text + ", which build from source instead: "
@@ -184,12 +183,19 @@ std::string reportEarlierSendFailure(const CommandOptions& options)
                              + ". This configure sends the ones it still lacks.");
 }
 
+int countFetchedHits(const LibraryCachePlan& plan)
+{
+    auto isFetched = [](const LibraryDecision& decision)
+    { return decision.isFetched; };
+    return static_cast<int>(std::ranges::count_if(plan.decisions, isFetched));
+}
+
 // Fetches the libraries this machine has no copy of from the library cache
-// location, and starts sending the ones the location lacks. Returns the CMake
-// that reports it.
+// location, plans again with what came, and starts sending the ones the
+// location lacks. Returns the CMake that reports it.
 std::string fetchFromLibraryCacheLocation(const CommandOptions& options,
                                           LibraryCachePlan& plan,
-                                          const LibraryStore& store)
+                                          const LibraryCachePlanning& planning)
 {
     auto location = parseLibraryCacheLocation(options.libraryCacheLocation);
 
@@ -197,33 +203,33 @@ std::string fetchFromLibraryCacheLocation(const CommandOptions& options,
         return {};
 
     auto report = reportEarlierSendFailure(options);
-    auto request = createFetchRequest(plan);
+    auto request = createFetchRequest(plan, planning.ranges);
     auto entries = describeEntriesInPlural(plan);
     auto started = std::chrono::steady_clock::now();
 
     try
     {
         auto fetched =
-            LibraryCacheAtLocation {*location, options.cmake}.fetchLibraries(request,
-                                                                             store);
-        markFetchedLibraries(plan, fetched, store);
+            LibraryCacheAtLocation {*location, options.cmake}.fetchLibraries(
+                request, planning.store);
+        plan = planLibraryCache(planning);
+        markFetchedLibraries(plan, fetched);
 
         if (!fetched.discarded.empty())
             report += createMessage(
                 "WARNING",
                 describeDiscardedLibraries(*location, fetched.discarded, entries));
 
-        startSendingLibraries(options, fetched.keysLocationLacks);
+        startSendingLibraries(options, fetched.locationLacks);
         return report
                + createMessage(
                    "STATUS",
                    "library cache at " + location->text + ": fetched "
-                       + std::to_string(fetched.fetchedKeys.size()) + " of the "
-                       + std::to_string(request.missingKeys.size()) + " " + entries
+                       + std::to_string(countFetchedHits(plan)) + " of the "
+                       + std::to_string(request.missing.size()) + " " + entries
                        + " this machine had no copy of in "
                        + describeSeconds(std::chrono::steady_clock::now() - started)
-                       + "; sending "
-                       + std::to_string(fetched.keysLocationLacks.size())
+                       + "; sending " + std::to_string(fetched.locationLacks.size())
                        + " it lacks");
     }
     catch (const std::exception& error)
@@ -272,6 +278,12 @@ struct EntryFromLink
     std::string key;
     EntryToStore entry;
 };
+
+BuiltWith readBuiltWith(const eacp::FilePath& buildDirectory, const std::string& key)
+{
+    auto path = getBuiltWithPath(buildDirectory, key);
+    return Miro::createFromJSONString<BuiltWith>(eacp::Files::readFile(path));
+}
 
 std::vector<eacp::FilePath> toFilePaths(const std::vector<std::string>& paths)
 {
@@ -367,7 +379,7 @@ void storeLinkedEntries(const CommandOptions& options,
 {
     auto store = LibraryStore {options.cache};
     auto stored = LibraryCacheStatistics {};
-    auto storedKeys = std::vector<std::string> {};
+    auto storedAddresses = std::vector<EntryAddress> {};
 
     for (auto& [key, entry]: collectEntriesFromLink(options, command))
     {
@@ -375,11 +387,12 @@ void storeLinkedEntries(const CommandOptions& options,
         {
             entry.inputs =
                 eacp::Files::readFile(getInputsPath(options.buildDirectory, key));
+            entry.builtWith = readBuiltWith(options.buildDirectory, key);
 
             if (store.storeEntry(key, entry))
             {
                 ++stored.getCounts(entry.kind).stores;
-                storedKeys.push_back(key);
+                storedAddresses.push_back({key, computeBuildId(entry.builtWith)});
             }
         }
         catch (const std::exception& error)
@@ -389,10 +402,10 @@ void storeLinkedEntries(const CommandOptions& options,
         }
     }
 
-    if (!storedKeys.empty())
+    if (!storedAddresses.empty())
         addToStatisticsOrWarn(store, stored);
 
-    startSendingLibraries(options, storedKeys);
+    startSendingLibraries(options, storedAddresses);
 }
 
 int runWrappedCommand(const std::vector<std::string>& command,
@@ -545,6 +558,12 @@ std::vector<StatisticsLine> createCountLines(CachedTargetKind kind,
                          std::to_string(counts.fetchedHits),
                          "copied from the library cache location, which had it"});
 
+    if (counts.otherToolchainHits > 0)
+        lines.push_back({indent + "  another toolchain",
+                         std::to_string(counts.otherToolchainHits),
+                         "built by another compiler, SDK, CMake or system version, "
+                         "which a range admitted"});
+
     lines.insert(lines.end(),
                  {{indent + "misses",
                    std::to_string(counts.misses),
@@ -670,21 +689,28 @@ std::string describeClearedStore(const CommandOptions& options)
 }
 } // namespace
 
-int runLibraryCacheCommand(const CommandOptions& options)
+int runLibraryCacheCommand(const CommandOptions& commandOptions)
 {
+    auto settings = resolveLibraryCacheSettings(createSettingSources(
+        commandOptions.cacheVariables, commandOptions.settingEnvironment));
+    auto options = commandOptions;
+    options.libraryCacheLocation = settings.location.text;
     auto description =
         parseConfigureDescription(eacp::Files::readFile(options.input));
     auto packages = findConfiguredPackages(options);
     auto variableNames = collectVariableNamesOfCachedPackages(packages);
-    auto inputs =
-        LibraryCacheInputs {description,
-                            packages,
-                            variableNames,
-                            {toForwardSlashes(options.buildDirectory.str()),
-                             toForwardSlashes(options.cache.str())}};
+    auto inputs = LibraryCacheInputs {
+        description,
+        packages,
+        variableNames,
+        {toForwardSlashes(options.buildDirectory.str()),
+         toForwardSlashes(options.cache.str())},
+        hashCompilerExecutables(description, options.cache / "lib")};
     auto store = LibraryStore {options.cache};
-    auto plan = planLibraryCache(inputs, store);
-    auto locationReport = fetchFromLibraryCacheLocation(options, plan, store);
+    auto planning =
+        LibraryCachePlanning {inputs, store, parseToolchainRanges(settings)};
+    auto plan = planLibraryCache(planning);
+    auto locationReport = fetchFromLibraryCacheLocation(options, plan, planning);
     addToStatisticsOrWarn(store, countHitsAndMisses(plan));
     auto snippet = createPlanSnippet(options, description, plan);
     writeLibraryCacheFiles(options, plan);
@@ -737,6 +763,25 @@ int runStoreLibrariesCommand(const CommandOptions& options)
     return 0;
 }
 
+std::vector<EntryAddress>
+    parseAddressesToSend(const eacp::Vector<std::string>& texts)
+{
+    auto addresses = std::vector<EntryAddress> {};
+
+    for (const auto& text: texts)
+    {
+        auto address = parseEntryAddress(text);
+
+        if (!address)
+            throw std::runtime_error(
+                "send-libraries takes --library=<key>/<build id>, not " + text);
+
+        addresses.push_back(*address);
+    }
+
+    return addresses;
+}
+
 int runSendLibrariesCommand(const CommandOptions& options)
 {
     auto location = parseLibraryCacheLocation(options.libraryCacheLocation);
@@ -750,8 +795,7 @@ int runSendLibrariesCommand(const CommandOptions& options)
     eacp::Files::createDirectories(log.parentDirectory());
     std::freopen(log.str().c_str(), "a", stdout);
     std::freopen(log.str().c_str(), "a", stderr);
-    auto keys = std::vector<std::string> {options.libraries.begin(),
-                                          options.libraries.end()};
+    auto keys = parseAddressesToSend(options.libraries);
 
     try
     {

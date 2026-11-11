@@ -1,13 +1,17 @@
 #pragma once
 
+#include "BuiltWith.h"
+
 #include <eacp/Core/Utils/FilePath.h>
 
 #include <Miro/Reflect.h>
 
+#include <compare>
 #include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lockstep
@@ -44,8 +48,25 @@ struct LibraryManifest
     // stored entry by eye.
     std::string inputs;
 
-    MIRO_REFLECT(kind, files, inputs)
+    // What built it; the build id is the SHA-256 of this record's JSON.
+    BuiltWith builtWith;
+
+    MIRO_REFLECT(kind, files, inputs, builtWith)
 };
+
+// Where one build of a key sits in a store: <key>/<build id>.
+struct EntryAddress
+{
+    std::string key;
+    std::string buildId;
+
+    std::string getPath() const { return key + "/" + buildId; }
+
+    auto operator<=>(const EntryAddress&) const = default;
+};
+
+// nullopt unless `text` is <key>/<build id>, both named like keys.
+std::optional<EntryAddress> parseEntryAddress(std::string_view text);
 
 // What one kind of entry counted since the last `cache clear`: hits and misses
 // by every configure, stores by every link that stored one.
@@ -59,7 +80,10 @@ struct LibraryCacheCounts
     // location, because this machine had no copy of it.
     int fetchedHits = 0;
 
-    MIRO_REFLECT(hits, misses, stores, fetchedHits)
+    // The hits on a build another toolchain made, which a range admitted.
+    int otherToolchainHits = 0;
+
+    MIRO_REFLECT(hits, misses, stores, fetchedHits, otherToolchainHits)
 };
 
 struct LibraryCacheStatistics
@@ -94,11 +118,13 @@ struct EntryToStore
     CachedTargetKind kind = CachedTargetKind::staticLibrary;
     std::vector<eacp::FilePath> files;
     std::string inputs;
+    BuiltWith builtWith;
 };
 
-// An entry as the store holds it: its directory and its manifest.
+// An entry as the store holds it: where, its directory and its manifest.
 struct StoredEntry
 {
+    EntryAddress address;
     eacp::FilePath directory;
     LibraryManifest manifest;
 
@@ -123,9 +149,10 @@ struct LibraryStoreDirectory
 };
 
 // Built static libraries, executables and object files under
-// <cache>/lib/format-<version>/<key>/: the entry's files and manifest.json. An
-// entry appears whole or not at all. Entries of an older format sit in another
-// directory, so nothing here reads them.
+// <cache>/lib/format-<version>/<key>/<build id>/: the entry's files and
+// manifest.json, one build per record of what built it. An entry appears whole
+// or not at all. Entries of an older format sit in another directory, so
+// nothing here reads them.
 class LibraryStore
 {
 public:
@@ -133,13 +160,16 @@ public:
     explicit LibraryStore(const LibraryStoreDirectory& storeDirectory);
 
     // The entry, when its manifest and every file it names are there.
-    std::optional<StoredEntry> findEntry(const std::string& key) const;
+    std::optional<StoredEntry> findEntry(const EntryAddress& address) const;
+
+    // Every whole build of `key`, in build id order.
+    std::vector<StoredEntry> listBuilds(const std::string& key) const;
 
     // <store directory>/format-<version>, which holds one directory per key.
     const eacp::FilePath& getFormatDirectory() const { return root; }
 
-    // Copies the files in under `key`, unless an entry for `key` is there
-    // already. True when this call stored it.
+    // Copies the files in under `key` and the id of the entry's record,
+    // unless that build is there already. True when this call stored it.
     bool storeEntry(const std::string& key, const EntryToStore& entry) const;
 
     // Adds to the counts in statistics.json, which another lockstep may be
@@ -154,7 +184,7 @@ public:
     void clear() const;
 
 private:
-    eacp::FilePath getEntryDirectory(const std::string& key) const;
+    eacp::FilePath getEntryDirectory(const EntryAddress& address) const;
 
     eacp::FilePath everyFormatRoot;
     eacp::FilePath root;
