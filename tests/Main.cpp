@@ -1,3 +1,4 @@
+#include "FakeArchiver.h"
 #include "LibrarySender.h"
 #include "StatisticsWriter.h"
 
@@ -26,6 +27,9 @@ int main(int argc, char* argv[])
 
     if (isRunAs(arguments, librarySenderArgument, librarySenderArgumentCount))
         return runLibrarySender({arguments[2], arguments[3], arguments[4]});
+
+    if (arguments.size() > 1 && arguments[1] == fakeArchiverMode)
+        return runFakeArchiver();
 
     return nano::run(argc, argv);
 }

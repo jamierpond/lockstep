@@ -5,6 +5,7 @@
 
 #include <eacp/Core/Utils/File.h>
 #include <eacp/Core/Utils/Files.h>
+#include <eacp/Core/Utils/Strings.h>
 #include <eacp/Core/Utils/TemporaryFile.h>
 
 #include <emberstore/Database.h>
@@ -65,6 +66,69 @@ void writeManifest(const eacp::FilePath& entryDirectory,
     if (!emberstore::writeFileAtomically(
             path, Miro::toJSONString(manifest, manifestIndent), storeDurability))
         throw std::runtime_error("cannot write " + path.str());
+}
+
+std::string describeDeleteFailure(const eacp::FilePath& path,
+                                  const std::error_code& error)
+{
+    return "cannot delete " + path.str() + ": " + error.message();
+}
+
+// Moves the entry out of its key's place before deleting it, so an entry that
+// cannot be moved, because a file in it is open on Windows, stays whole and
+// usable rather than half deleted.
+std::optional<std::string> deleteEntry(const eacp::FilePath& entry)
+{
+    auto retired = eacp::TemporaryFile {entry.parentDirectory(), ".deleting"};
+
+    if (auto error = renameAtAnyLengthAndGetError(entry, retired.path()))
+        return describeDeleteFailure(entry, error);
+
+    if (auto error = removeTreeAtAnyLengthAndGetError(retired.path()))
+        return describeDeleteFailure(retired.path(), error);
+
+    return std::nullopt;
+}
+
+eacp::Vector<eacp::FilePath>
+    listEveryFormatEntry(const eacp::FilePath& everyFormatRoot)
+{
+    auto entries = eacp::Vector<eacp::FilePath> {};
+
+    for (const auto& format: eacp::Files::listDirectory(everyFormatRoot, {}))
+    {
+        if (format.kind != eacp::Files::EntryKind::directory)
+            continue;
+
+        for (const auto& entry: eacp::Files::listDirectory(format.path, {}))
+        {
+            if (isNamedLikeLibraryKey(entry.path))
+                entries.add(entry.path);
+        }
+    }
+
+    return entries;
+}
+
+eacp::Vector<std::string> deleteEveryEntry(const eacp::FilePath& everyFormatRoot)
+{
+    auto failures = eacp::Vector<std::string> {};
+
+    for (const auto& entry: listEveryFormatEntry(everyFormatRoot))
+    {
+        if (auto failure = deleteEntry(entry))
+            failures.add(*failure);
+    }
+
+    return failures;
+}
+
+eacp::Vector<std::string> deleteTree(const eacp::FilePath& path)
+{
+    if (auto error = removeTreeAtAnyLengthAndGetError(path))
+        return {describeDeleteFailure(path, error)};
+
+    return {};
 }
 
 emberstore::Document<LibraryCacheStatistics>
@@ -221,8 +285,15 @@ LibraryStoreSummary LibraryStore::summarize() const
 
 void LibraryStore::clear() const
 {
-    if (eacp::Files::isDirectory(everyFormatRoot)
-        && !eacp::Files::removeAll(everyFormatRoot))
-        throw std::runtime_error("cannot delete " + everyFormatRoot.str());
+    if (!eacp::Files::isDirectory(everyFormatRoot))
+        return;
+
+    auto failures = deleteEveryEntry(everyFormatRoot);
+
+    if (failures.empty())
+        failures = deleteTree(everyFormatRoot);
+
+    if (!failures.empty())
+        throw std::runtime_error(eacp::Strings::join(failures, "\n"));
 }
 } // namespace lockstep

@@ -42,15 +42,27 @@ std::filesystem::path getLongPathSafeStdPath(const eacp::FilePath& path)
 
 void removeTreeAtAnyLength(const eacp::FilePath& path)
 {
+    removeTreeAtAnyLengthAndGetError(path);
+}
+
+std::error_code removeTreeAtAnyLengthAndGetError(const eacp::FilePath& path)
+{
     auto error = std::error_code {};
     std::filesystem::remove_all(getLongPathSafeStdPath(path), error);
+    return error;
 }
 
 bool renameAtAnyLength(const eacp::FilePath& from, const eacp::FilePath& to)
 {
+    return !renameAtAnyLengthAndGetError(from, to);
+}
+
+std::error_code renameAtAnyLengthAndGetError(const eacp::FilePath& from,
+                                             const eacp::FilePath& to)
+{
     auto error = std::error_code {};
     std::filesystem::rename(
         getLongPathSafeStdPath(from), getLongPathSafeStdPath(to), error);
-    return !error;
+    return error;
 }
 } // namespace lockstep

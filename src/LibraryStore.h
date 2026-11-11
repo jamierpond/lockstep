@@ -95,7 +95,8 @@ public:
     LibraryStoreSummary summarize() const;
 
     // Deletes every stored library and the counts, of every format: the whole
-    // of <cache>/lib.
+    // of <cache>/lib. An entry it cannot delete stays whole; it then throws,
+    // naming each path it could not delete and why, and leaves the counts.
     void clear() const;
 
 private:

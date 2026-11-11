@@ -151,6 +151,17 @@ void runCMakeTar(const eacp::FilePath& cmake,
                                  + result.errorOutput);
 }
 
+void copyEntryOutOfStore(const LibraryStore& store,
+                         const std::string& key,
+                         const eacp::FilePath& destination)
+{
+    auto entry = store.getFormatDirectory() / key;
+
+    if (!eacp::Files::copyDirectory(entry, destination / key))
+        throw std::runtime_error("cannot copy " + entry.str() + " into "
+                                 + destination.str());
+}
+
 std::string getSshDirectory(const std::string& directory)
 {
     if (directory.empty() || directory == "~")
@@ -314,13 +325,21 @@ public:
     void send(const std::vector<std::string>& keys,
               const LibraryStore& localCopies) const override
     {
+        // tar runs in a copy outside the cache: Windows cannot delete a
+        // directory a running process works in, so `lockstep cache clear`
+        // during a send would fail.
+        auto staging = eacp::TemporaryFile {};
+        eacp::Files::createDirectories(staging.path());
         auto archive = eacp::TemporaryFile {".tar"};
         auto arguments = eacp::Vector<std::string> {"cf", archive.path().str()};
 
         for (const auto& key: keys)
+        {
+            copyEntryOutOfStore(localCopies, key, staging.path());
             arguments.add(key);
+        }
 
-        runCMakeTar(cmake, arguments, localCopies.getFormatDirectory());
+        runCMakeTar(cmake, arguments, staging.path());
         runSsh({sendScript,
                 keys,
                 eacp::Files::readFile(archive.path()),

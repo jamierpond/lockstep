@@ -1,3 +1,4 @@
+#include "FakeArchiver.h"
 #include "LibrarySender.h"
 #include "StatisticsWriter.h"
 #include "TestDirectory.h"
@@ -10,8 +11,13 @@
 #include <NanoTest/NanoTest.h>
 
 #include <eacp/Core/Process/Process.h>
+#include <eacp/Core/Utils/StdPath.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace nano;
@@ -24,6 +30,23 @@ constexpr auto packageDirectory = "/cache/src/1111";
 constexpr auto projectDirectory = "/project";
 constexpr auto testExecutablePath = LOCKSTEP_TESTS_EXECUTABLE;
 const auto sampleKey = std::string(lockstep::libraryKeyLength, 'a');
+constexpr auto fakeArchiverPatience = std::chrono::seconds {60};
+constexpr auto filePollInterval = std::chrono::milliseconds {20};
+
+bool waitForFile(const eacp::FilePath& path)
+{
+    auto deadline = std::chrono::steady_clock::now() + fakeArchiverPatience;
+
+    while (!eacp::Files::isFile(path))
+    {
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+
+        std::this_thread::sleep_for(filePollInterval);
+    }
+
+    return true;
+}
 
 eacp::FilePath getCurrentFormatStore(const eacp::FilePath& cache)
 {
@@ -775,6 +798,105 @@ auto tConcurrentSends =
     auto entries = eacp::Files::listDirectory(location.getFormatDirectory(), {});
     check(entries.size() == 1);
 };
+
+auto tClearDuringSend =
+    test("LibraryCacheLocation/clearDeletesEverythingWhileSendIsArchiving") = []
+{
+    auto directory = createEmptyTestDirectory("library-cache-clear-during-send");
+    auto library = directory / "build" / "libgreeter.a";
+    writeTestFile(library, "archive");
+    auto entry = createSampleEntry("inputs");
+    auto local = lockstep::LibraryStore {directory / "cache"};
+    local.storeLibrary(entry.key, library, entry.inputs);
+    auto testExecutable = eacp::FilePath {testExecutablePath};
+    auto fakeCMake = directory / "fake-cmake" / testExecutable.fileName();
+    eacp::Files::createDirectories(fakeCMake.parentDirectory());
+    check(eacp::Files::copyFile(testExecutable, fakeCMake));
+    auto location = *lockstep::parseLibraryCacheLocation(
+        "lockstep-test-host-never-reached:libraries");
+
+    auto send = [&]
+    {
+        try
+        {
+            lockstep::LibraryCacheAtLocation {location, fakeCMake}.sendLibraries(
+                {entry.key}, local);
+        }
+        catch (const std::exception&)
+        {
+        }
+    };
+    auto sender = std::thread {send};
+    auto isArchiving = waitForFile(fakeCMake.sibling(fakeArchiverStartedName));
+    auto clearFailure = std::string {};
+
+    try
+    {
+        local.clear();
+    }
+    catch (const std::exception& error)
+    {
+        clearFailure = error.what();
+    }
+
+    eacp::Files::writeFile(fakeCMake.sibling(fakeArchiverReleaseName), "");
+    sender.join();
+
+    check(isArchiving);
+    check(clearFailure.empty());
+    check(!eacp::Files::isDirectory(directory / "cache" / "lib"));
+    auto archiverDirectory =
+        eacp::Files::readFile(fakeCMake.sibling(fakeArchiverStartedName));
+    check(archiverDirectory.find(directory.fileName()) == std::string::npos);
+};
+
+#if defined(_WIN32)
+auto tClearKeepsHeldEntry =
+    test("LibraryStore/clearKeepsEntryWholeAndNamesItWhenAFileInItIsOpen") = []
+{
+    auto directory = createEmptyTestDirectory("library-store-clear-held");
+    auto library = directory / "build" / "greeter.lib";
+    writeTestFile(library, "archive");
+    auto held = createSampleEntry("held inputs");
+    auto notHeld = createSampleEntry("free inputs");
+    auto store = lockstep::LibraryStore {directory / "cache"};
+    store.storeLibrary(held.key, library, held.inputs);
+    store.storeLibrary(notHeld.key, library, notHeld.inputs);
+    auto clearFailure = std::string {};
+
+    {
+        auto openLibrary =
+            std::ifstream {eacp::toStdPath(*store.findLibrary(held.key))};
+
+        try
+        {
+            store.clear();
+        }
+        catch (const std::exception& error)
+        {
+            clearFailure = error.what();
+        }
+    }
+
+    check(clearFailure.find(held.key) != std::string::npos);
+    check(clearFailure.find(notHeld.key) == std::string::npos);
+    check(store.findLibrary(held.key).has_value());
+    check(!store.findLibrary(notHeld.key));
+    store.clear();
+    check(!eacp::Files::isDirectory(directory / "cache" / "lib"));
+};
+#endif
+
+int runFakeArchiver()
+{
+    auto directory = eacp::Files::executablePath().parentDirectory();
+    auto started = directory / fakeArchiverStartedName;
+    auto written = started.sibling(std::string {fakeArchiverStartedName} + ".part");
+    eacp::Files::writeFile(written, std::filesystem::current_path().string());
+    eacp::Files::moveFile(written, started);
+    waitForFile(directory / fakeArchiverReleaseName);
+    return 1;
+}
 
 int runLibrarySender(const LibrarySenderArguments& arguments)
 {
