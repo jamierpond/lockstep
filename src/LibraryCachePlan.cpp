@@ -183,6 +183,7 @@ std::string createExecutableHitSnippet(const CommandOptions& options,
 
 // The target keeps its sources, so $<TARGET_OBJECTS:...> names the same files,
 // and each compile copies its stored object into place instead of compiling.
+// The generator replaces <OBJECT> with the object file each compile writes.
 std::string createObjectLibraryHitSnippet(const CommandOptions& options,
                                           const LibraryDecision& decision)
 {
@@ -193,7 +194,7 @@ std::string createObjectLibraryHitSnippet(const CommandOptions& options,
 
     launcher +=
         " " + quoteForShell("--objects=$<TARGET_OBJECTS:" + decision.target + ">")
-        + " --";
+        + " " + quoteForShell("--object=<OBJECT>") + " --";
     return createPropertySetting(
         decision.target, "RULE_LAUNCH_COMPILE", quoteForCMake(launcher));
 }

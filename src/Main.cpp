@@ -225,6 +225,9 @@ void addBehaviourOptions(eacp::Args::Parser& parser,
                   options.objects,
                   "the object library's object files, a ;-list, for "
                   "use-cached-objects");
+    parser.option("--object",
+                  options.object,
+                  "the object file the compile writes, for use-cached-objects");
     parser.option("--library-cache-location",
                   options.libraryCacheLocation,
                   "a directory or [user@]host:directory holding the library cache, "

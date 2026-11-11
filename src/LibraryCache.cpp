@@ -148,6 +148,32 @@ bool isSameFile(const std::filesystem::path& first,
     auto error = std::error_code {};
     return std::filesystem::equivalent(first, second, error);
 }
+// The command's arguments, with the words of each @<file> response file in its
+// place.
+std::vector<std::string> expandResponseFiles(const std::vector<std::string>& command,
+                                             const eacp::FilePath& workingDirectory)
+{
+    auto directory = eacp::toStdPath(workingDirectory);
+    auto expanded = std::vector<std::string> {};
+
+    for (const auto& argument: command)
+    {
+        if (!argument.starts_with('@'))
+        {
+            expanded.push_back(argument);
+            continue;
+        }
+
+        auto responseFile =
+            eacp::FilePath {(directory / argument.substr(1)).generic_string()};
+
+        for (const auto& word: readResponseFile(responseFile))
+            expanded.push_back(word);
+    }
+
+    return expanded;
+}
+
 } // namespace
 
 std::optional<std::string>
@@ -316,30 +342,6 @@ std::set<std::string>
         names.merge(collectUpperCaseIdentifiers(eacp::Files::readFile(file)));
 
     return names;
-}
-
-std::vector<std::string> expandResponseFiles(const std::vector<std::string>& command,
-                                             const eacp::FilePath& workingDirectory)
-{
-    auto directory = eacp::toStdPath(workingDirectory);
-    auto expanded = std::vector<std::string> {};
-
-    for (const auto& argument: command)
-    {
-        if (!argument.starts_with('@'))
-        {
-            expanded.push_back(argument);
-            continue;
-        }
-
-        auto responseFile =
-            eacp::FilePath {(directory / argument.substr(1)).generic_string()};
-
-        for (const auto& word: readResponseFile(responseFile))
-            expanded.push_back(word);
-    }
-
-    return expanded;
 }
 
 bool isCommandInput(const std::vector<std::string>& command,

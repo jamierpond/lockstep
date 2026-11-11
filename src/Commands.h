@@ -44,6 +44,8 @@ struct CommandOptions
     // ;-list in `objects`, $<TARGET_OBJECTS:...> of the object library.
     eacp::Vector<std::string> storedObjects;
     std::string objects;
+    // The object file the compile use-cached-objects stands in for writes.
+    std::string object;
     // LOCKSTEP_LIBRARY_CACHE_LOCATION: a directory or [user@]host:directory.
     std::string libraryCacheLocation;
     std::string topLevelIncludes;

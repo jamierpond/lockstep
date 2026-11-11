@@ -61,11 +61,6 @@ std::set<std::string> collectUpperCaseIdentifiers(std::string_view text);
 std::set<std::string>
     collectPackageVariableNames(const eacp::FilePath& sourceDirectory);
 
-// The command's arguments, with the words of each @<file> response file in its
-// place.
-std::vector<std::string> expandResponseFiles(const std::vector<std::string>& command,
-                                             const eacp::FilePath& workingDirectory);
-
 // True when `file` is one of the command's arguments, or is named in a
 // response file (@file) among them, so the command really reads it.
 bool isCommandInput(const std::vector<std::string>& command,

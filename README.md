@@ -305,7 +305,10 @@ only their names and paths, as for system headers. On Apple systems the debug
 information of a cached executable stays in the object files of the build
 directory that linked it, as the linker always leaves it there: once that
 directory is deleted, a debugger has no line information for the executable's
-own sources.
+own sources. A source a package generates but a project target compiles,
+such as the `<Name>_Register.cpp` ResEmbed adds to every target that links a
+library with resources, compiles in every build: it is the project target's
+compile, which the cache does not store.
 
 On Windows with whole-program optimisation (`/GL`), the stored `.lib` files
 hold MSVC's intermediate code rather than machine code, so they are large:

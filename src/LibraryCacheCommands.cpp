@@ -36,8 +36,6 @@ constexpr auto statisticsValueWidth = 10;
 constexpr auto millisecondsPerSecond = 1000.0;
 constexpr auto sendLogName = "send.log";
 constexpr auto sendFailureName = "send-failure.txt";
-constexpr auto msvcObjectOutputPrefixes =
-    std::array<std::string_view, 2> {"/Fo", "-Fo"};
 
 #if defined(_WIN32)
 constexpr auto arePathsCaseInsensitive = true;
@@ -439,28 +437,6 @@ void copyIntoPlace(const eacp::FilePath& stored, const eacp::FilePath& destinati
                                  + destination.str());
 }
 
-// The object file a compile command writes: after -o, or in /Fo<file> or
-// -Fo<file> for MSVC. NMake passes them in a response file, which the caller
-// expands.
-std::optional<std::string> findCompileOutput(const std::vector<std::string>& command)
-{
-    for (auto index = std::size_t {0}; index < command.size(); ++index)
-    {
-        const auto& argument = command[index];
-
-        if (argument == "-o" && index + 1 < command.size())
-            return command[index + 1];
-
-        for (auto prefix: msvcObjectOutputPrefixes)
-        {
-            if (argument.starts_with(prefix) && argument.size() > prefix.size())
-                return argument.substr(prefix.size());
-        }
-    }
-
-    return std::nullopt;
-}
-
 // The path as one spelling, so a relative path from the compile command and an
 // absolute one from $<TARGET_OBJECTS:...> compare equal.
 std::string getComparablePath(const std::string& path)
@@ -732,18 +708,21 @@ int runUseCachedObjectsCommand(const CommandOptions& options)
 {
     const auto& command = options.argumentsAfterSeparator;
     auto objects = splitCMakeList(options.objects);
-    auto workingDirectory = eacp::FilePath {std::filesystem::current_path()};
-    auto output = findCompileOutput(expandResponseFiles(command, workingDirectory));
-    auto index = output ? findObjectIndex(objects, *output) : std::nullopt;
+    auto index = findObjectIndex(objects, options.object);
     auto isStoredInSameOrder = objects.size() == options.storedObjects.size();
 
     // A compile that writes none of the stored objects, such as a precompiled
     // header's, runs as it is.
     if (!index || !isStoredInSameOrder)
+    {
+        printStatus(options.object
+                    + " is not one of the object files the library cache stored "
+                      "for its target, so it compiles");
         return runWrappedCommand(command, "use-cached-objects");
+    }
 
     copyIntoPlace(eacp::FilePath {options.storedObjects[*index]},
-                  eacp::FilePath {*output});
+                  eacp::FilePath {options.object});
     return 0;
 }
 
