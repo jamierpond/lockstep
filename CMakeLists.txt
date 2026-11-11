@@ -8,7 +8,7 @@ set(LOCKSTEP_LIBRARY_CACHE ON CACHE BOOL
         "Link each locked package's static libraries from lockstep's shared library cache when an earlier build compiled them from the same inputs, instead of compiling them again")
 set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES ${CMAKE_CURRENT_LIST_DIR}/cmake/lockstep.cmake)
 
-project(lockstep VERSION 0.5.0 LANGUAGES C CXX)
+project(lockstep VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
