@@ -89,3 +89,33 @@ auto tOlderLockIsNotCurrent = test("LockFile/lockMissingNewFieldsIsNotCurrent") 
     eacp::Files::writeFile(path, std::string_view {text});
     check(!lockstep::isLockFileCurrent(path));
 };
+
+auto tCrlfLockIsCurrent = test("LockFile/lockWithWindowsLineEndsIsCurrent") = []
+{
+    auto directory = createEmptyTestDirectory("lock-crlf");
+    auto path = directory / "lockstep.lock";
+
+    auto lock = lockstep::LockFile {};
+    lock.storePackage(LockFileTests::createPackage("a", "1"));
+    lockstep::writeLockFile(path, lock);
+    auto text = eacp::Files::readFile(path);
+    auto crlf = std::string {};
+
+    for (auto character: text)
+    {
+        if (character == '\n')
+            crlf += '\r';
+
+        crlf += character;
+    }
+
+    eacp::Files::writeFile(path, std::string_view {crlf});
+    check(lockstep::isLockFileCurrent(path));
+    check(lockstep::readLockFile(path).packages.size() == 1);
+
+    auto edited = crlf;
+    auto field = std::string_view {"      \"submodules\": [],\r\n"};
+    edited.erase(edited.find(field), field.size());
+    eacp::Files::writeFile(path, std::string_view {edited});
+    check(!lockstep::isLockFileCurrent(path));
+};

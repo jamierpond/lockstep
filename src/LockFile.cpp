@@ -1,4 +1,5 @@
 #include "LockFile.h"
+#include "ConfigureDescription.h"
 #include "Sha256.h"
 
 #include <eacp/Core/Utils/Files.h>
@@ -83,7 +84,9 @@ bool isLockFileCurrent(const eacp::FilePath& path)
     if (!eacp::Files::exists(path))
         return true;
 
-    auto text = eacp::Files::readFile(path);
+    // git with core.autocrlf checks the lock out with CRLF line ends on
+    // Windows; the lock is the same, so only the line ends are let go.
+    auto text = replaceAll(eacp::Files::readFile(path), "\r\n", "\n");
     return formatLockFile(Miro::createFromJSONString<LockFile>(text)) == text;
 }
 

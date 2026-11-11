@@ -61,6 +61,9 @@ LockFile readLockFile(const eacp::FilePath& path);
 
 // Whether the file holds exactly what this lockstep would write for it, so a
 // lock from an older version, missing fields this one records, is noticed.
+// Line ends do not count: a CRLF checkout of the same lock is current, and is
+// left as it is rather than rewritten, since git would show the rewrite as a
+// change on a machine whose checkout converts line ends.
 bool isLockFileCurrent(const eacp::FilePath& path);
 
 // Sorts the packages by name and recomputes the root hash before writing, so
