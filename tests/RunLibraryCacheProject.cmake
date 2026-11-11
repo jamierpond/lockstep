@@ -85,7 +85,7 @@ endif ()
 # (/Zi) by default, whose .pdb the cache does not store; other compilers ignore it.
 if (MSVC_ABI)
     configure(build-debug "0 hits, 0 misses, 1 skipped" -DCMAKE_BUILD_TYPE=Debug --log-level=VERBOSE)
-    expect_output("library cache skips greeter: MSVC writes its debug information to a separate \\.pdb")
+    expect_output("SKIP +greeter \\(MSVC writes its debug information to a separate \\.pdb")
 else ()
     configure(build-debug "0 hits, 1 misses, 0 skipped" -DCMAKE_BUILD_TYPE=Debug)
 endif ()

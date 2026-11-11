@@ -1120,3 +1120,21 @@ int runStatisticsWriter(std::string_view cacheDirectory)
 
     return 0;
 }
+
+auto tReportNamesEachOutcome = test("LibraryCache/reportPutsEachTargetOnItsOwnLine") = []
+{
+    auto plan = lockstep::LibraryCachePlan {};
+    auto hit = lockstep::LibraryDecision {};
+    hit.target = "greeter";
+    hit.cached = lockstep::StoredEntry {};
+    auto miss = lockstep::LibraryDecision {};
+    miss.target = "farewell";
+    plan.decisions = {hit, miss};
+
+    auto report = lockstep::createReport(plan);
+
+    check(report.find("message(STATUS \"lockstep:   HIT   greeter\")") != std::string::npos);
+    check(report.find("message(STATUS \"lockstep:   MISS  farewell (not in the cache yet)\")")
+          != std::string::npos);
+    check(report.find("library cache: 1 hits, 1 misses, 0 skipped") != std::string::npos);
+};

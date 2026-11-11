@@ -665,12 +665,48 @@ std::string createMessage(std::string_view level, const std::string& text)
            + quoteForCMake("lockstep: " + text) + ")\n";
 }
 
+std::string createOutcomeLine(std::string_view outcome,
+                              CachedTargetKind kind,
+                              const std::string& target)
+{
+    constexpr auto outcomeColumnWidth = std::size_t {6};
+    auto paddedOutcome = std::string {outcome};
+    paddedOutcome.resize(outcomeColumnWidth, ' ');
+    return "  " + paddedOutcome + describeTarget(kind, target);
+}
+
+std::string describeMissReason(const LibraryDecision& decision)
+{
+    if (decision.refusals.empty())
+        return "not in the cache yet";
+
+    auto reason = std::string {"a stored build is not taken: "} + decision.refusals.front();
+
+    for (auto index = std::size_t {1}; index < decision.refusals.size(); ++index)
+        reason += "; " + decision.refusals[index];
+
+    return reason;
+}
+
+std::string createOutcomeMessage(const LibraryDecision& decision)
+{
+    if (decision.cached)
+        return createMessage("STATUS",
+                             createOutcomeLine("HIT", decision.kind, decision.target));
+
+    return createMessage("STATUS",
+                         createOutcomeLine("MISS", decision.kind, decision.target)
+                             + " (" + describeMissReason(decision) + ")");
+}
+
 std::string createReport(const LibraryCachePlan& plan)
 {
-    auto report = std::string {};
+    auto report = createMessage("STATUS", "library cache, per target:");
 
     for (const auto& decision: plan.decisions)
     {
+        report += createOutcomeMessage(decision);
+
         if (decision.cached)
             report += createMessage("VERBOSE", describeHit(decision));
         else
@@ -678,15 +714,11 @@ std::string createReport(const LibraryCachePlan& plan)
     }
 
     for (const auto& skipped: plan.skipped)
-        report += createMessage("VERBOSE",
-                                "library cache skips "
-                                    + describeTarget(skipped.kind, skipped.target)
-                                    + ": " + skipped.reason);
+        report += createMessage("STATUS",
+                                createOutcomeLine("SKIP", skipped.kind, skipped.target)
+                                    + " (" + skipped.reason + ")");
 
-    return report
-           + createMessage("STATUS",
-                           "library cache: " + describeSummary(plan)
-                               + " (--log-level=VERBOSE names them)");
+    return report + createMessage("STATUS", "library cache: " + describeSummary(plan));
 }
 
 std::string describeEntriesInPlural(const LibraryCachePlan& plan)
