@@ -29,6 +29,9 @@ lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp
 lockstep_add_package(NAME emberstore GITHUB tamber-inc/emberstore
         GIT_TAG 2cda8a019ff2df7ee135f1b5a89847378bbcaf55 EXCLUDE_FROM_ALL)
 
+# Set after the packages, so only this project's own targets build with -Werror.
+set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+
 add_library(lockstep-lib STATIC
         src/BuiltWith.cpp
         src/ByteSize.cpp
