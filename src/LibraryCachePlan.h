@@ -8,6 +8,7 @@
 #include <eacp/Core/Utils/FilePath.h>
 
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,11 @@ struct LibraryCachePlanning
     const LibraryStore& store;
     ToolchainRanges ranges;
 };
+
+// The project's own targets, the packages' executables, everything those link
+// and the object libraries whose objects they take. The cache neither looks up
+// nor stores a package library outside it, which nothing here links.
+std::set<std::string> collectTargetsTheBuildUses(const LibraryCacheInputs& inputs);
 
 // Keys every static and object library of a locked package first, then every
 // executable, whose key covers the keys of the libraries it links.

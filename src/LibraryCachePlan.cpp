@@ -101,6 +101,45 @@ bool isPackageTarget(const LibraryCacheInputs& inputs, const RecordFields& field
            && findOwningPackage(inputs.packages, findField(fields, "SOURCE_DIR"));
 }
 
+bool takesObjectsOf(const RecordFields& fields, const std::string& objectLibrary)
+{
+    return findField(fields, "SOURCES")
+               .find("$<TARGET_OBJECTS:" + objectLibrary + ">")
+           != std::string::npos;
+}
+
+// The project's own targets and the packages' executables, which a custom
+// command can run without linking them.
+std::vector<std::string> collectRootTargets(const LibraryCacheInputs& inputs)
+{
+    auto roots = std::vector<std::string> {};
+
+    for (const auto& [target, fields]: inputs.description.targets)
+    {
+        auto isPackageExecutable =
+            isPackageTarget(inputs, fields)
+            && findCachedTargetKind(fields) == CachedTargetKind::executable;
+
+        if (isPackageExecutable || !isPackageTarget(inputs, fields))
+            roots.push_back(target);
+    }
+
+    return roots;
+}
+
+void addObjectLibrariesTakenBy(const ConfigureDescription& description,
+                               const std::string& target,
+                               std::set<std::string>& usedTargets)
+{
+    const auto& fields = findSubject(description.targets, target);
+
+    for (const auto& [candidate, candidateFields]: description.targets)
+    {
+        if (takesObjectsOf(fields, candidate))
+            usedTargets.insert(candidate);
+    }
+}
+
 // The kind of a static or object library a package declares.
 std::optional<CachedTargetKind>
     findPackageLibraryKind(const LibraryCacheInputs& inputs,
@@ -128,12 +167,13 @@ void planLibraries(LibraryCachePlan& plan,
                    const LibraryCachePlanning& planning)
 {
     const auto& inputs = planning.inputs;
+    auto usedTargets = collectTargetsTheBuildUses(inputs);
 
     for (const auto& [target, fields]: inputs.description.targets)
     {
         auto kind = findPackageLibraryKind(inputs, fields);
 
-        if (!kind)
+        if (!kind || !usedTargets.contains(target))
             continue;
 
         if (auto reason = findReasonNotToCache(inputs, target))
@@ -289,12 +329,6 @@ bool isLinkingTarget(const RecordFields& fields)
            && !isCMakeTrue(findField(fields, "IMPORTED"));
 }
 
-bool takesObjectsOf(const RecordFields& fields, const std::string& objectLibrary)
-{
-    return findField(fields, "SOURCES")
-               .find("$<TARGET_OBJECTS:" + objectLibrary + ">")
-           != std::string::npos;
-}
 
 // How store-libraries is told to store each kind: the option, and the
 // generator expression for the files.
@@ -545,6 +579,24 @@ BuildChoice chooseStoredBuild(const LibraryStore& store,
     }
 
     return choice;
+}
+
+std::set<std::string> collectTargetsTheBuildUses(const LibraryCacheInputs& inputs)
+{
+    auto usedTargets = std::set<std::string> {};
+
+    for (const auto& root: collectRootTargets(inputs))
+    {
+        usedTargets.insert(root);
+
+        for (const auto& linked: collectLinkClosure(inputs.description, root))
+            usedTargets.insert(linked);
+    }
+
+    for (const auto& target: std::set<std::string> {usedTargets})
+        addObjectLibrariesTakenBy(inputs.description, target, usedTargets);
+
+    return usedTargets;
 }
 
 LibraryCachePlan planLibraryCache(const LibraryCachePlanning& planning)
