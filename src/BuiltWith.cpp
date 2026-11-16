@@ -1,5 +1,5 @@
 #include "BuiltWith.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <eacp/Core/Utils/Strings.h>
 
@@ -181,7 +181,7 @@ std::strong_ordering compareVersionTexts(const std::string& first,
 
 std::string computeBuildId(const BuiltWith& builtWith)
 {
-    return computeSha256Hex(Miro::toJSONString(builtWith));
+    return eacp::computeSha256Hex(Miro::toJSONString(builtWith));
 }
 
 std::optional<std::string> findReasonToRefuseBuild(const BuiltWith& stored,

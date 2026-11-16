@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Sha256.h"
+#include "FileSha256.h"
 
 #include <eacp/Core/Utils/FilePath.h>
 

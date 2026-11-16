@@ -3,7 +3,7 @@
 #include "CompileFlags.h"
 #include "KeyText.h"
 #include "PackageArguments.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <eacp/Core/Utils/Files.h>
 #include <eacp/Core/Utils/StdPath.h>

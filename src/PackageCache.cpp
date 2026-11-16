@@ -5,7 +5,7 @@
 #include "MerkleHash.h"
 #include "Paths.h"
 #include "Messages.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
 #include "Status.h"
 
 #include <eacp/Core/Process/Process.h>
@@ -30,7 +30,7 @@ constexpr auto urlKeyLength = 16;
 
 std::string computeUrlKey(const std::string& url)
 {
-    return computeSha256Hex(url).substr(0, urlKeyLength);
+    return eacp::computeSha256Hex(url).substr(0, urlKeyLength);
 }
 
 eacp::FilePath getStampPath(const eacp::FilePath& sourceDirectory)

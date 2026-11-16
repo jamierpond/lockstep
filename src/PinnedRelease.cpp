@@ -1,7 +1,7 @@
 #include "PinnedRelease.h"
 #include "Download.h"
 #include "LockFile.h"
-#include "Sha256.h"
+#include "FileSha256.h"
 
 #include <eacp/Core/Platform/Platform.h>
 #include <eacp/Core/Utils/Files.h>

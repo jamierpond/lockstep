@@ -3,7 +3,7 @@
 #include "CompileFlags.h"
 #include "LibraryCache.h"
 #include "PackageArguments.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <algorithm>
 #include <array>

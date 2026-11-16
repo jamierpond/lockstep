@@ -1,7 +1,7 @@
 #include "LibraryStore.h"
 #include "LibraryCache.h"
 #include "LongPath.h"
-#include "Sha256.h"
+#include "FileSha256.h"
 
 #include <eacp/Core/Utils/File.h>
 #include <eacp/Core/Utils/Files.h>

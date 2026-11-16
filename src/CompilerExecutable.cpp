@@ -1,6 +1,6 @@
 #include "CompilerExecutable.h"
 #include "RememberedFileHash.h"
-#include "Sha256.h"
+#include "FileSha256.h"
 
 #include <eacp/Core/Process/Process.h>
 #include <eacp/Core/Utils/File.h>
@@ -240,7 +240,7 @@ std::string hashFiles(FileHasher& hasher, const std::vector<eacp::FilePath>& fil
     if (lines.empty())
         return {};
 
-    return computeSha256Hex(lines);
+    return eacp::computeSha256Hex(lines);
 }
 
 std::set<ConfiguredCompiler>

@@ -3,7 +3,7 @@
 
 #include <LibraryCacheLocation.h>
 #include <LibraryStore.h>
-#include <Sha256.h>
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <NanoTest/NanoTest.h>
 
@@ -44,7 +44,7 @@ lockstep::BuiltWith createBuiltWith(const std::string& compilerVersion)
 
 struct SampleBuilds
 {
-    std::string key = lockstep::computeSha256Hex("inputs");
+    std::string key = eacp::computeSha256Hex("inputs");
     eacp::FilePath library;
 };
 

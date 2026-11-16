@@ -2,7 +2,7 @@
 #include "TestDirectory.h"
 
 #include <CompilerExecutable.h>
-#include <Sha256.h>
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <NanoTest/NanoTest.h>
 
@@ -170,7 +170,7 @@ auto tRemembersHashes =
     auto stamp = std::filesystem::last_write_time(stdPath);
 
     auto first = hashCompiler(compiler, directory);
-    check(first == lockstep::computeSha256Hex("first"));
+    check(first == eacp::computeSha256Hex("first"));
     check(eacp::Files::isFile(directory / "compiler-executables.json"));
 
     writeTestFile(cl, "other");
@@ -178,7 +178,7 @@ auto tRemembersHashes =
     check(hashCompiler(compiler, directory) == first);
 
     std::filesystem::last_write_time(stdPath, stamp + std::chrono::seconds {2});
-    check(hashCompiler(compiler, directory) == lockstep::computeSha256Hex("other"));
+    check(hashCompiler(compiler, directory) == eacp::computeSha256Hex("other"));
 };
 
 bool isRunAsFakeCompiler(std::span<char*> arguments)

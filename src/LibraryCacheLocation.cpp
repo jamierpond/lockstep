@@ -1,6 +1,6 @@
 #include "LibraryCacheLocation.h"
 #include "LibraryEviction.h"
-#include "Sha256.h"
+#include "FileSha256.h"
 
 #include <eacp/Core/Process/Process.h>
 #include <eacp/Core/Utils/Files.h>
@@ -270,7 +270,7 @@ std::optional<std::string> findReasonToDiscard(const EntryAddress& address,
                                                const eacp::FilePath& entry,
                                                const LibraryManifest& manifest)
 {
-    if (computeSha256Hex(manifest.inputs) != address.key)
+    if (eacp::computeSha256Hex(manifest.inputs) != address.key)
         return "the key inputs in its manifest do not hash to its key";
 
     if (computeBuildId(manifest.builtWith) != address.buildId)

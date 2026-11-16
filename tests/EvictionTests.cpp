@@ -6,7 +6,7 @@
 #include <LibraryCacheLocation.h>
 #include <LibraryEviction.h>
 #include <LibraryStore.h>
-#include <Sha256.h>
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <NanoTest/NanoTest.h>
 
@@ -77,7 +77,7 @@ lockstep::EntryAddress
     storeUsedEntry(const SampleStore& sample, int index, int hoursAgo)
 {
     auto inputs = "inputs " + std::to_string(index);
-    auto key = lockstep::computeSha256Hex(inputs);
+    auto key = eacp::computeSha256Hex(inputs);
     sample.store.storeEntry(
         key,
         {lockstep::CachedTargetKind::staticLibrary, {sample.library}, inputs, {}});

@@ -1,6 +1,7 @@
 #include "MerkleHash.h"
 #include "LongPath.h"
-#include "Sha256.h"
+#include "FileSha256.h"
+#include <eacp/Core/Utils/Strings.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -92,7 +93,7 @@ std::string describeEntryKind(TreeEntryKind kind)
 std::string computeSymlinkHash(const std::filesystem::path& link)
 {
     auto target = eacp::FilePath(std::filesystem::read_symlink(link));
-    return computeSha256Hex(target.str());
+    return eacp::computeSha256Hex(target.str());
 }
 
 std::string computeMerkleHashOfStdPath(const std::filesystem::path& directory);
@@ -114,7 +115,7 @@ std::string computeEntryHash(const TreeEntry& entry)
 
 std::string computeMerkleHashOfStdPath(const std::filesystem::path& directory)
 {
-    auto hasher = Sha256 {};
+    auto hasher = eacp::Sha256 {};
 
     for (const auto& entry: listHashedEntries(directory))
     {
@@ -123,7 +124,9 @@ std::string computeMerkleHashOfStdPath(const std::filesystem::path& directory)
         hasher.update(line);
     }
 
-    return convertDigestToHex(hasher.finish());
+    const auto digest = hasher.finish();
+
+    return eacp::Strings::toHex(digest);
 }
 
 std::string describeFileForStamp(const std::filesystem::path& file)
@@ -136,7 +139,7 @@ std::string describeFileForStamp(const std::filesystem::path& file)
     return ' ' + std::to_string(size) + ' ' + std::to_string(writtenTicks);
 }
 
-void addTreeToStamp(Sha256& hasher,
+void addTreeToStamp(eacp::Sha256& hasher,
                     const std::filesystem::path& directory,
                     const std::string& relativeDirectory)
 {
@@ -163,8 +166,9 @@ std::string computeMerkleHash(const eacp::FilePath& directory)
 
 std::string computeTreeStamp(const eacp::FilePath& directory)
 {
-    auto hasher = Sha256 {};
+    auto hasher = eacp::Sha256 {};
     addTreeToStamp(hasher, getLongPathSafeStdPath(directory), {});
-    return convertDigestToHex(hasher.finish());
+    const auto digest = hasher.finish();
+    return eacp::Strings::toHex(digest);
 }
 } // namespace lockstep

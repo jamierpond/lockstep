@@ -9,7 +9,7 @@
 #include <LibraryCachePlan.h>
 #include <LibraryStore.h>
 #include <ByteSize.h>
-#include <Sha256.h>
+#include <FileSha256.h>
 
 #include <NanoTest/NanoTest.h>
 
@@ -846,7 +846,7 @@ struct SampleEntry
 
 SampleEntry createSampleEntry(std::string_view inputs)
 {
-    return {std::string {inputs}, lockstep::computeSha256Hex(inputs)};
+    return {std::string {inputs}, eacp::computeSha256Hex(inputs)};
 }
 
 auto tFetchesFromDirectory =

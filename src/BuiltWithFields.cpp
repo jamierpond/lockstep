@@ -1,7 +1,7 @@
 #include "BuiltWithFields.h"
 #include "CompilerExecutable.h"
 #include "PackageArguments.h"
-#include "Sha256.h"
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <array>
 
@@ -109,6 +109,9 @@ BuiltWith moveBuiltWithFieldsOutOfKey(const LibraryCacheInputs& inputs,
 }
 LibraryKey createLibraryKey(const std::string& inputs, const BuiltWith& builtWith)
 {
-    return {computeSha256Hex(inputs), inputs, builtWith, computeBuildId(builtWith)};
+    return {eacp::computeSha256Hex(inputs),
+            inputs,
+            builtWith,
+            computeBuildId(builtWith)};
 }
 } // namespace lockstep

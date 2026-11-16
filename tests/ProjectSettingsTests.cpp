@@ -2,7 +2,7 @@
 
 #include <LibraryCacheSettings.h>
 #include <ProjectSettings.h>
-#include <Sha256.h>
+#include <eacp/Core/Utils/Sha256.h>
 
 #include <NanoTest/NanoTest.h>
 
@@ -17,7 +17,7 @@ std::string findReadError(std::string_view text)
 {
     // Named after the text, so tests running at once never share a directory.
     auto directory = createEmptyTestDirectory("project-settings-error-"
-                                              + lockstep::computeSha256Hex(text));
+                                              + eacp::computeSha256Hex(text));
     auto path = directory / "lockstep.json";
     writeTestFile(path, text);
 
