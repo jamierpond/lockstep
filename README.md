@@ -583,6 +583,7 @@ lockstep verify --full     # rehash every tree instead of trusting size/mtime st
 lockstep root              # print the root hash
 lockstep cache stats       # stored libraries, their size on disk, and hits and misses
 lockstep cache clear       # delete the stored libraries and reset the counts
+lockstep --version         # e.g. lockstep 0.9.0+f30059f: this binary's semver and commit
 ```
 
 `cache stats` prints:

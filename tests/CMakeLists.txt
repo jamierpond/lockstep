@@ -148,3 +148,5 @@ if (NOT is_multi_config)
     set_tests_properties(Consumer/libraryCacheOverSsh Consumer/libraryCacheToolsOverSsh PROPERTIES
             SKIP_REGULAR_EXPRESSION "lockstep-test-skipped")
 endif ()
+
+pond_add_version_test(lockstep lockstep)

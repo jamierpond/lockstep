@@ -72,10 +72,14 @@ target_link_libraries(lockstep-lib PRIVATE emberstore)
 
 add_executable(lockstep src/Main.cpp)
 
+# A copy of Rudder's: lockstep is what fetches Rudder, so it can't depend on it.
+include(cmake/PondVersion.cmake)
+pond_add_version_library(LockstepVersion)
+
 if (WIN32)
     target_sources(lockstep PRIVATE packaging/lockstep.manifest)
 endif ()
-target_link_libraries(lockstep PRIVATE lockstep-lib)
+target_link_libraries(lockstep PRIVATE lockstep-lib LockstepVersion)
 # res_embed_add links ResEmbed into lockstep directly, ahead of eacp-core and
 # Miro, which need it too; without reordering CMake repeats it after them and
 # Apple's ld warns about the duplicate.

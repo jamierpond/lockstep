@@ -14,6 +14,8 @@
 #include <eacp/Core/Utils/Environment.h>
 #include <eacp/Core/Utils/Strings.h>
 
+#include <PondVersion.h>
+
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -43,7 +45,10 @@ constexpr auto commandsHelp = R"(commands:
                  run by the build in place of, or around, the link or compile
                  command after --, when LOCKSTEP_LIBRARY_CACHE is ON
   send-libraries started by store-libraries and library-cache to copy
-                 libraries to LOCKSTEP_LIBRARY_CACHE_LOCATION)";
+                 libraries to LOCKSTEP_LIBRARY_CACHE_LOCATION
+
+lockstep --version prints this binary's version and the commit it was built
+from, even in a project that pins another lockstep release.)";
 
 constexpr auto argumentSeparator = std::string_view {"--"};
 constexpr auto machineWideCommand = std::string_view {"cache"};
@@ -263,8 +268,22 @@ void addBehaviourOptions(eacp::Args::Parser& parser,
                 "root prints '-- lockstep: root <hash>'");
 }
 
+bool isVersionRequest(const eacp::Vector<std::string>& arguments)
+{
+    return arguments.size() == 1 && arguments[0] == "--version";
+}
+
+int printVersion()
+{
+    eacp::Console::print("lockstep " + pond::getVersionString());
+    return 0;
+}
+
 int parseAndRunCommand()
 {
+    if (isVersionRequest(getArgumentsAfterProgram()))
+        return printVersion();
+
     if (auto exitCode = runProjectPinnedVersionInstead())
         return *exitCode;
 
