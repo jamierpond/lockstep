@@ -221,7 +221,7 @@ MaterializedPackage PackageCache::materialize(const PackageRequest& request,
                                               Network network) const
 {
     auto stagingReservation = createStagingDirectory();
-    auto staging = stagingReservation.path();
+    const auto& staging = stagingReservation.path();
 
     try
     {

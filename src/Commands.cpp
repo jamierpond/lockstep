@@ -496,11 +496,13 @@ std::string createFindPackageRedirect(const PackageSpec& spec)
     auto lowerName = eacp::Strings::toLower(spec.name);
     auto redirects =
         std::string {"${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/"} + lowerName;
-    return "file(WRITE \"" + redirects
-           + "-config.cmake\" \"include(\\\"\\${CMAKE_CURRENT_LIST_DIR}/" + lowerName
-           + "-extra.cmake\\\" OPTIONAL)\\n\")\n" + "file(WRITE \"" + redirects
-           + "-config-version.cmake\" \"set(PACKAGE_VERSION_COMPATIBLE TRUE)\\n"
-             "set(PACKAGE_VERSION_EXACT TRUE)\\n\")\n";
+    return R"cmake(file(WRITE ")cmake" + redirects
+           + R"cmake(-config.cmake" "include(\"\${CMAKE_CURRENT_LIST_DIR}/)cmake"
+           + lowerName + R"cmake(-extra.cmake\" OPTIONAL)\n"))cmake" + "\n"
+           + R"cmake(file(WRITE ")cmake" + redirects
+           + R"cmake(-config-version.cmake" "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n)cmake"
+             R"cmake(set(PACKAGE_VERSION_EXACT TRUE)\n"))cmake"
+           + "\n";
 }
 
 // Every command that includes the snippet is a function, so the package's
@@ -519,7 +521,14 @@ std::string createPropagatingBlock(const std::string& name, const std::string& b
                    + "endblock()\n";
 
     for (const auto& variable: propagated)
-        snippet += "set(" + variable + " \"${" + variable + "}\" PARENT_SCOPE)\n";
+    {
+        snippet += "set(";
+        snippet += variable;
+        snippet += R"( "${)";
+        snippet += variable;
+        snippet += R"(}" PARENT_SCOPE))";
+        snippet += '\n';
+    }
 
     return snippet;
 }

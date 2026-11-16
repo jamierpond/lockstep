@@ -771,7 +771,7 @@ auto tCorruptFiles = test("LibraryStore/readsCorruptOrHalfWrittenFilesAsEmpty") 
     auto storeDirectory = getCurrentFormatStore(directory / "cache");
 
     writeTestFile(storeDirectory / sampleKey / plainBuildId / "manifest.json",
-                  "{\"fileName\": \"libgree");
+                  R"({"fileName": "libgree)");
     writeTestFile(storeDirectory / "statistics.json", "not json at all");
 
     check(!findLibrary(store, sampleKey));

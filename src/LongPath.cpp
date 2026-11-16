@@ -42,7 +42,8 @@ std::filesystem::path getLongPathSafeStdPath(const eacp::FilePath& path)
 
 void removeTreeAtAnyLength(const eacp::FilePath& path)
 {
-    removeTreeAtAnyLengthAndGetError(path);
+    auto ignoredError = std::error_code {};
+    std::filesystem::remove_all(getLongPathSafeStdPath(path), ignoredError);
 }
 
 std::error_code removeTreeAtAnyLengthAndGetError(const eacp::FilePath& path)

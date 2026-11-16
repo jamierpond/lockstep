@@ -32,7 +32,10 @@ eacp::FilePath createTreeDeeperThanMaxPath(const std::string& name)
     auto deepest = root;
 
     for (auto level = 0; level < deepDirectoryCount; ++level)
-        deepest = deepest / std::string(deepDirectoryNameLength, 'a' + level);
+    {
+        auto directoryLetter = static_cast<char>('a' + level);
+        deepest = deepest / std::string(deepDirectoryNameLength, directoryLetter);
+    }
 
     auto file = deepest / "box_curve25519xchacha20poly1305.c";
     std::filesystem::create_directories(lockstep::getLongPathSafeStdPath(deepest));
