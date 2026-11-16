@@ -18,6 +18,11 @@ build:
 test: build
     ctest --test-dir {{build_dir}} --output-on-failure
 
+[doc("Build everything, then run clang-tidy (eacp's checks) over lockstep's sources; fails on any finding")]
+[unix]
+tidy: build
+    scripts/tidy.sh {{build_dir}}
+
 [doc('clang-format every tracked source in place')]
 [unix]
 format:
