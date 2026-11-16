@@ -260,7 +260,7 @@ std::optional<std::string> findReasonInStoredFile(const eacp::FilePath& entry,
     if (!eacp::Files::isFile(path))
         return "it holds no " + file.name;
 
-    if (computeFileSha256Hex(path) != file.sha256)
+    if (lockstep::computeFileSha256Hex(path) != file.sha256)
         return file.name + " does not match the SHA-256 its manifest records for it";
 
     return std::nullopt;

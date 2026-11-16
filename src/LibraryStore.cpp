@@ -372,7 +372,7 @@ bool LibraryStore::storeEntry(const std::string& key,
             throw std::runtime_error("cannot copy " + file.str() + " into "
                                      + staging.path().str());
 
-        manifest.files.push_back({name, computeFileSha256Hex(stagedFile)});
+        manifest.files.push_back({name, lockstep::computeFileSha256Hex(stagedFile)});
     }
 
     writeManifest(staging.path(), manifest);

@@ -128,7 +128,7 @@ eacp::FilePath fetchPinnedExecutable(const PinnedRelease& release,
         makeExecutable(executable);
     }
 
-    auto actualHash = computeFileSha256Hex(executable);
+    auto actualHash = lockstep::computeFileSha256Hex(executable);
 
     if (actualHash != release.sha256)
     {

@@ -24,8 +24,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(cmake/linux-static-curl.cmake)
 endif ()
 
+# eacp jp/develop (develop plus Jamie's unmerged eacp pull requests, one commit each),
+# pinned at tag jp/develop/2026-11-16.3: the branch is rebuilt, the tag keeps this commit fetchable.
 lockstep_add_package(NAME eacp GITHUB eyalamirmusic/eacp
-        GIT_TAG 57b2ef604bd12d340d7c62873da74525611e9071 EXCLUDE_FROM_ALL)
+        GIT_TAG 55e4023b52d30118c083c6c1efada7cd43edf8ba EXCLUDE_FROM_ALL)
 lockstep_add_package(NAME emberstore GITHUB tamber-inc/emberstore
         GIT_TAG 2cda8a019ff2df7ee135f1b5a89847378bbcaf55 EXCLUDE_FROM_ALL)
 

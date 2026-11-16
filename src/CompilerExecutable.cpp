@@ -196,7 +196,7 @@ public:
                 return known.sha256;
         }
 
-        entry.sha256 = computeFileSha256Hex(file);
+        entry.sha256 = lockstep::computeFileSha256Hex(file);
         added.push_back(entry);
         return entry.sha256;
     }
